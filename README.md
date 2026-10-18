@@ -83,8 +83,10 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
 Der Tab **Einstellungen** bearbeitet Ollama-URL, `keep_alive`, Timeout und Modelloptionen und zeigt die installierten Modelle an.
 Ist `council.synthesizer` leer, fasst das erste Ratsmitglied zusammen.
 
-Der **System-Prompt im Chat** wird beim Tippen automatisch in `config.json` gespeichert. Er übersteht also
-F5 und einen Neustart und gilt auf allen Geräten im Heimnetz.
+Diese Felder werden beim Tippen automatisch in `config.json` gespeichert. Sie überstehen also F5 und einen
+Neustart und gelten auf allen Geräten im Heimnetz: Speed-Test-Prompt, Council-Frage, Chat-System-Prompt,
+`keep_alive`, Timeout und Modell-Optionen. Ungültige Eingaben (kaputtes JSON, Timeout unter 10 s) werden nicht
+gespeichert, das Feld zeigt dann einen Hinweis.
 
 ### Hinweise zu Parallelität und Messwerten
 

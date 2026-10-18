@@ -167,6 +167,67 @@ function alertBox(message) {
   status.className = 'status err';
 }
 
+// Saves a field to config.json shortly after typing stops, when the field loses focus, and on page
+// reload/close. `section.key` is the config entry; `parse` turns the text into the value to store
+// (or throws an Error whose message is shown instead of saving).
+const pendingSaves = new Set();
+
+function autosave(input, section, key, { parse = (v) => v, msg } = {}) {
+  if (!msg) {
+    msg = el('span', 'hint');
+    input.closest('label').insertBefore(msg, input);
+  }
+  let timer = null;
+  const save = (keepalive = false) => {
+    clearTimeout(timer);
+    pendingSaves.delete(save);
+    let value;
+    try {
+      value = parse(input.value);
+    } catch (e) {
+      msg.textContent = ` · ${e.message}`;
+      return;
+    }
+    if (JSON.stringify(state.config[section][key]) === JSON.stringify(value)) return;
+    state.config[section][key] = value;
+    fetch('/api/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [section]: { [key]: value } }), keepalive,
+    }).then((res) => {
+      msg.textContent = res.ok ? ' · gespeichert' : ' · Speichern fehlgeschlagen';
+    }).catch(() => { msg.textContent = ' · Speichern fehlgeschlagen'; });
+  };
+  input.addEventListener('input', () => {
+    msg.textContent = '';
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+    pendingSaves.add(save);
+  });
+  input.addEventListener('blur', () => save());
+}
+
+window.addEventListener('pagehide', () => pendingSaves.forEach((save) => save(true)));
+
+function parseOptions(text) {
+  if (!text.trim()) return {};
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('ungültiges JSON, nicht gespeichert');
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('muss ein JSON-Objekt {…} sein');
+  }
+  return value;
+}
+
+function parseTimeout(text) {
+  const n = Number(text);
+  if (!(n >= 10)) throw new Error('mindestens 10 Sekunden');
+  return n;
+}
+
 async function flash(button, task) {
   const label = button.textContent;
   try {
@@ -410,29 +471,6 @@ $('chat-text').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !$('chat-send').disabled) { e.preventDefault(); runChat(); }
 });
 $('chat-new').addEventListener('click', () => { chatHistory = []; $('chat-log').replaceChildren(); });
-// The system prompt saves itself shortly after typing stops, and on page reload/close.
-let systemTimer = null;
-function saveSystemPrompt(keepalive = false) {
-  clearTimeout(systemTimer);
-  systemTimer = null;
-  const system = $('chat-system').value;
-  if (system === state.config.chat.system) return;
-  state.config.chat.system = system;
-  fetch('/api/config', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat: { system } }), keepalive,
-  }).then((res) => {
-    $('chat-system-msg').textContent = res.ok ? '· gespeichert' : '· Speichern fehlgeschlagen';
-  }).catch(() => {});
-}
-$('chat-system').addEventListener('input', () => {
-  $('chat-system-msg').textContent = '';
-  clearTimeout(systemTimer);
-  systemTimer = setTimeout(saveSystemPrompt, 600);
-});
-$('chat-system').addEventListener('blur', () => saveSystemPrompt());
-window.addEventListener('pagehide', () => { if (systemTimer) saveSystemPrompt(true); });
-
 $('chat-save').addEventListener('click', (e) => flash(e.target, () => {
   Object.assign(state.config.chat, { model: $('chat-model').value, system: $('chat-system').value });
   return saveConfig();
@@ -441,11 +479,7 @@ $('chat-save').addEventListener('click', (e) => flash(e.target, () => {
 // ---------- Einstellungen ----------
 
 function renderSettings() {
-  const { ollama, server } = state.config;
-  $('set-url').value = ollama.url;
-  $('set-keepalive').value = ollama.keep_alive ?? '';
-  $('set-timeout').value = ollama.timeout;
-  $('set-options').value = Object.keys(ollama.options || {}).length ? JSON.stringify(ollama.options, null, 2) : '';
+  const { server } = state.config;
   $('set-server').textContent =
     `Server lauscht auf ${server.host}:${server.port}. Änderungen daran in config.json greifen erst nach einem Neustart.`;
   const list = $('set-models');
@@ -460,12 +494,11 @@ function renderSettings() {
 $('set-save').addEventListener('click', async () => {
   const msg = $('set-msg');
   try {
-    const raw = $('set-options').value.trim();
     Object.assign(state.config.ollama, {
       url: $('set-url').value.trim(),
       keep_alive: $('set-keepalive').value.trim() || null,
-      timeout: Number($('set-timeout').value) || 600,
-      options: raw ? JSON.parse(raw) : {},
+      timeout: parseTimeout($('set-timeout').value),
+      options: parseOptions($('set-options').value),
     });
     await saveConfig();
     msg.textContent = 'Gespeichert.';
@@ -534,12 +567,24 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
 
 (async () => {
   state.config = await api('/api/config');
-  const { speedtest, council, chat } = state.config;
+  const { speedtest, council, chat, ollama } = state.config;
   $('speed-prompt').value = speedtest.prompt;
   $('speed-parallel').checked = speedtest.parallel;
+  $('council-question').value = council.question;
   $('council-rounds').value = council.rounds;
   $('council-parallel').checked = council.parallel;
   $('chat-system').value = chat.system;
+  $('set-url').value = ollama.url;
+  $('set-keepalive').value = ollama.keep_alive ?? '';
+  $('set-timeout').value = ollama.timeout;
+  $('set-options').value = Object.keys(ollama.options || {}).length ? JSON.stringify(ollama.options, null, 2) : '';
+
+  autosave($('speed-prompt'), 'speedtest', 'prompt');
+  autosave($('council-question'), 'council', 'question');
+  autosave($('chat-system'), 'chat', 'system', { msg: $('chat-system-msg') });
+  autosave($('set-keepalive'), 'ollama', 'keep_alive', { parse: (v) => v.trim() || null });
+  autosave($('set-timeout'), 'ollama', 'timeout', { parse: parseTimeout });
+  autosave($('set-options'), 'ollama', 'options', { parse: parseOptions });
   await loadModels();
   lastRefresh = Date.now();
   renderPickers(configSelection());
