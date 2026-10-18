@@ -1,0 +1,27 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "timeout": 600,
+    "keep_alive": "5m",
+    "options": {}
+  },
+  "speedtest": {
+    "models": [],
+    "parallel": true,
+    "prompt": "Erkläre in drei Sätzen, wie ein Transformer-Sprachmodell funktioniert."
+  },
+  "council": {
+    "members": [],
+    "synthesizer": "",
+    "rounds": 2,
+    "parallel": true
+  },
+  "chat": {
+    "model": "",
+    "system": ""
+  }
+}

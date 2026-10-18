@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Council</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Local Council</h1>
+    <nav>
+      <button data-tab="speed" class="active">Speed-Test</button>
+      <button data-tab="council">Council</button>
+      <button data-tab="chat">Chat</button>
+      <button data-tab="settings">Einstellungen</button>
+    </nav>
+    <span id="status" class="status" title="Verbindung zu Ollama">…</span>
+  </header>
+
+  <main>
+    <!-- Speed-Test -->
+    <section id="tab-speed" class="tab">
+      <div class="panel">
+        <label>Prompt
+          <textarea id="speed-prompt" rows="3"></textarea>
+        </label>
+        <div class="field"><span>Modelle</span><div id="speed-models" class="model-list"></div></div>
+        <label class="check"><input type="checkbox" id="speed-parallel"> Gleichzeitig senden
+          <small>(sonst nacheinander, das ergibt fairere Messwerte)</small></label>
+        <div class="actions">
+          <button id="speed-run" class="primary">Starten</button>
+          <button id="speed-stop" disabled>Stopp</button>
+          <button id="speed-save" class="ghost">Auswahl als Standard speichern</button>
+        </div>
+      </div>
+      <div id="speed-table"></div>
+      <div id="speed-cards" class="cards"></div>
+    </section>
+
+    <!-- Council -->
+    <section id="tab-council" class="tab" hidden>
+      <div class="panel">
+        <label>Frage
+          <textarea id="council-question" rows="3" placeholder="Was soll der Rat beraten?"></textarea>
+        </label>
+        <div class="field"><span>Ratsmitglieder</span><div id="council-members" class="model-list"></div></div>
+        <div class="row">
+          <label>Zusammenfassung durch
+            <select id="council-synth"></select>
+          </label>
+          <label>Diskussionsrunden
+            <input type="number" id="council-rounds" min="0" max="5">
+          </label>
+          <label class="check"><input type="checkbox" id="council-parallel"> Mitglieder gleichzeitig</label>
+        </div>
+        <div class="actions">
+          <button id="council-run" class="primary">Rat einberufen</button>
+          <button id="council-stop" disabled>Stopp</button>
+          <button id="council-save" class="ghost">Auswahl als Standard speichern</button>
+        </div>
+      </div>
+      <div id="council-out"></div>
+    </section>
+
+    <!-- Chat -->
+    <section id="tab-chat" class="tab chat" hidden>
+      <div class="panel">
+        <div class="row">
+          <label>Modell <select id="chat-model"></select></label>
+          <button id="chat-save" class="ghost">Als Standard speichern</button>
+          <button id="chat-new">Neuer Chat</button>
+        </div>
+        <details>
+          <summary>System-Prompt</summary>
+          <textarea id="chat-system" rows="3" placeholder="Optional, z. B. „Antworte knapp und auf Deutsch.“"></textarea>
+        </details>
+      </div>
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form" class="chat-input">
+        <textarea id="chat-text" rows="2" placeholder="Nachricht … (Enter senden, Shift+Enter Zeilenumbruch)"></textarea>
+        <button type="submit" id="chat-send" class="primary">Senden</button>
+        <button type="button" id="chat-stop" disabled>Stopp</button>
+      </form>
+    </section>
+
+    <!-- Einstellungen -->
+    <section id="tab-settings" class="tab" hidden>
+      <div class="panel">
+        <label>Ollama-URL <input id="set-url" placeholder="http://127.0.0.1:11434"></label>
+        <div class="row">
+          <label>keep_alive <input id="set-keepalive" placeholder="5m"></label>
+          <label>Timeout (s) <input type="number" id="set-timeout" min="10"></label>
+        </div>
+        <label>Modell-Optionen (JSON, gilt für alle Modi)
+          <textarea id="set-options" rows="3" placeholder='{"temperature": 0.7, "num_ctx": 8192}'></textarea>
+        </label>
+        <p class="hint" id="set-server"></p>
+        <div class="actions">
+          <button id="set-save" class="primary">Speichern</button>
+          <span id="set-msg" class="hint"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <strong>Installierte Modelle</strong>
+        <div id="set-models" class="hint"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
