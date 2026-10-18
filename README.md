@@ -7,7 +7,7 @@ Sie läuft auf einem Rechner im Heimnetz und ist von allen Geräten unter `http:
 
 | Modus | Was passiert |
 |---|---|
-| **Speed-Test** | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. |
+| **Speed-Test** | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. Jeder Lauf wird pro Modell als CSV gespeichert, und zwei Verlaufsdiagramme (nacheinander / gleichzeitig) zeigen die Entwicklung. |
 | **Council** | Mehrere Modelle beantworten eine Frage. Danach sehen sie die (anonymisierten) Antworten der anderen, diskutieren über N Runden (Standard: 2) und überarbeiten ihre Antwort. Zum Schluss fasst ein wählbares Modell alles zu einer finalen Antwort zusammen. |
 | **Chat** | Normaler Chat mit einem frei wählbaren Modell, optional mit System-Prompt. |
 
@@ -92,6 +92,23 @@ Ist `council.synthesizer` leer, fasst das erste Ratsmitglied zusammen.
 - Tokens/s und Prompt-Tokens/s stammen direkt aus Ollamas Zeitmessung (`eval_count / eval_duration`).
   *Erstes Token* und *Gesamtzeit* misst der Server selbst, inklusive Ladezeit und Warteschlange.
 
+### Speed-Test-Verlauf (CSV)
+
+Jedes erfolgreich gemessene Modell bekommt pro Lauf eine Zeile in `data/speedtest/<modell>.csv`,
+z. B. `data/speedtest/llama3.1_8b.csv`. Der Ordner steht in `.gitignore`.
+
+| Spalte | Bedeutung |
+|---|---|
+| `timestamp`, `run_id` | Zeitpunkt der Messung / Start des Laufs (alle Modelle eines Laufs teilen die `run_id`) |
+| `mode`, `concurrency` | `sequential` oder `parallel`, Anzahl gleichzeitig angefragter Modelle |
+| `model`, `version` | Modellname und Anfang des Ollama-Digests (ändert sich bei `ollama pull`-Updates) |
+| `tps`, `ttft`, `wall_time` | Tokens/s, Sekunden bis zum ersten Token, Gesamtzeit |
+| `tokens`, `prompt_tokens`, `prompt_tps`, `load_time` | Antwort-Tokens, Prompt-Tokens, Prompt-Tokens/s, Ladezeit |
+
+Neue Modelle bekommen automatisch eine eigene Datei und Farbe. Wird ein Modell aktualisiert, beginnt
+seine Linie im Diagramm neu, und der Tooltip zeigt „neue Version“. Ein „Gleichzeitig“-Lauf mit nur einem Modell
+zählt als „nacheinander“. Zum Zurücksetzen einfach die CSV-Dateien löschen.
+
 ## Projektstruktur
 
 ```
@@ -101,6 +118,7 @@ Local-Council/
 │   ├── main.py          # FastAPI: API-Routen + Auslieferung des Frontends
 │   ├── config.py        # config.json laden/speichern
 │   ├── ollama.py        # Ollama-Client (Modelle auflisten, Chat streamen, Messwerte)
+│   ├── history.py       # Speed-Test-Verlauf als CSV pro Modell
 │   └── modes/
 │       ├── runner.py    # gemeinsamer Baustein: Jobs parallel/seriell ausführen, Streams zusammenführen
 │       ├── speedtest.py # Modus 1
@@ -109,7 +127,9 @@ Local-Council/
 ├── static/              # Frontend: reines HTML/CSS/JS, kein Build-Schritt
 │   ├── index.html
 │   ├── style.css
+│   ├── chart.js         # kleines SVG-Liniendiagramm (keine externe Bibliothek)
 │   └── app.js
+├── data/speedtest/      # CSV-Messdaten (wird automatisch angelegt, nicht im Git)
 ├── config.example.json  # Standardkonfiguration (Vorlage für config.json)
 ├── requirements.txt
 └── run.sh
@@ -126,6 +146,7 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | GET | `/api/models` | installierte Ollama-Modelle |
 | GET / PUT | `/api/config` | Konfiguration lesen / speichern |
 | POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream |
+| GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen |
 | POST | `/api/council` | `{question, members?, synthesizer?, rounds?, parallel?}` → NDJSON-Stream |
 | POST | `/api/chat` | `{messages: [{role, content}], model?, system?}` → NDJSON-Stream |
 

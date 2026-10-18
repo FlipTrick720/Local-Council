@@ -34,6 +34,7 @@ class OllamaClient:
             details = m.get("details") or {}
             models.append({
                 "name": m["name"],
+                "digest": m.get("digest", ""),
                 "size": m.get("size"),
                 "parameter_size": details.get("parameter_size"),
                 "quantization": details.get("quantization_level"),

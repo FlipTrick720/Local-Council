@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import config
+from app import config, history
 from app.config import ROOT
 from app.modes import chat, council, speedtest
 from app.ollama import OllamaClient, OllamaError
@@ -85,6 +85,11 @@ def post_speedtest(req: SpeedtestRequest):
         raise HTTPException(400, "Keine Modelle für den Speed-Test ausgewählt.")
     parallel = req.parallel if req.parallel is not None else cfg["speedtest"]["parallel"]
     return ndjson(speedtest.run(OllamaClient.from_config(cfg), models, req.prompt, parallel))
+
+
+@app.get("/api/speedtest/history")
+def get_speedtest_history():
+    return history.load_all()
 
 
 @app.post("/api/council")

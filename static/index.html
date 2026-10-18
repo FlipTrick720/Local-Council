@@ -36,6 +36,24 @@
       </div>
       <div id="speed-table"></div>
       <div id="speed-cards" class="cards"></div>
+      <div class="panel">
+        <div class="row">
+          <strong class="grow">Verlauf</strong>
+          <label class="compact">Kennzahl
+            <select id="hist-metric">
+              <option value="tps">Tokens/s</option>
+              <option value="ttft">Erstes Token (s)</option>
+              <option value="wall_time">Gesamtzeit (s)</option>
+            </select>
+          </label>
+        </div>
+        <h3>Nacheinander</h3>
+        <div id="hist-seq"></div>
+        <h3>Gleichzeitig</h3>
+        <div id="hist-par"></div>
+        <p class="hint">Jeder Punkt ist ein Lauf. Die Rohdaten liegen pro Modell in <code>data/speedtest/*.csv</code>.
+          Nach einem Modell-Update (<code>ollama pull</code>) beginnt die Linie neu.</p>
+      </div>
     </section>
 
     <!-- Council -->
@@ -108,6 +126,7 @@
     </section>
   </main>
 
+  <script src="chart.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

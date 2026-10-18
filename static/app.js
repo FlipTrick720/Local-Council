@@ -221,9 +221,67 @@ const runSpeed = runner($('speed-run'), $('speed-stop'), async (signal) => {
     }, signal);
   } finally {
     Object.values(cards).forEach((c) => c.stopped());
+    loadSpeedHistory();
   }
 });
 
+const METRICS = {
+  tps: (v) => v.toFixed(1),
+  ttft: (v) => `${v.toFixed(2)} s`,
+  wall_time: (v) => `${v.toFixed(1)} s`,
+};
+let speedHistory = [];
+
+async function loadSpeedHistory() {
+  try {
+    speedHistory = await api('/api/speedtest/history');
+  } catch {
+    speedHistory = [];
+  }
+  renderSpeedHistory();
+}
+
+function renderSpeedHistory() {
+  const metric = $('hist-metric').value;
+  // Colors are assigned over all models ever measured, so a model keeps its color in both charts.
+  const allModels = [...new Set(speedHistory.map((r) => r.model))].sort();
+  for (const [mode, id] of [['sequential', 'hist-seq'], ['parallel', 'hist-par']]) {
+    const rows = speedHistory.filter((r) => r.mode === mode && r[metric] != null);
+    const runs = [...new Set(rows.map((r) => r.run_id))];
+    const runIndex = Object.fromEntries(runs.map((run, i) => [run, i + 1]));
+    const xHeaders = {};
+    for (const r of rows) {
+      const when = new Date(r.run_id).toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+      });
+      const extra = mode === 'parallel' ? ` · ${r.concurrency} gleichzeitig` : '';
+      xHeaders[runIndex[r.run_id]] = `Lauf ${runIndex[r.run_id]} · ${when}${extra}`;
+    }
+    const series = allModels.filter((m) => rows.some((r) => r.model === m)).map((model) => {
+      const i = allModels.indexOf(model);
+      const segments = [];
+      let version = null;
+      for (const r of rows.filter((r) => r.model === model)) {
+        const isNew = !segments.length || r.version !== version;
+        if (isNew) segments.push([]);
+        version = r.version;
+        const short = r.version ? r.version.slice(0, 7) : '';
+        const note = short && (isNew && segments.length > 1 ? `neue Version ${short}` : `Version ${short}`);
+        segments.at(-1).push({ x: runIndex[r.run_id], y: r[metric], note });
+      }
+      // Past 8 models the colors repeat, so the second round is drawn dashed.
+      return { name: model, color: `var(--series-${(i % 8) + 1})`, dash: i >= 8 ? '5 3' : null, segments };
+    });
+    lineChart($(id), { series, xHeaders, format: METRICS[metric], empty: 'Noch keine Läufe in diesem Modus.' });
+  }
+}
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderSpeedHistory, 150);
+});
+$('hist-metric').addEventListener('change', renderSpeedHistory);
 $('speed-run').addEventListener('click', runSpeed);
 $('speed-save').addEventListener('click', (e) => flash(e.target, () => {
   Object.assign(state.config.speedtest, {
@@ -418,4 +476,5 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   $('chat-system').value = chat.system;
   await loadModels();
   renderAll();
+  loadSpeedHistory();
 })();

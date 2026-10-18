@@ -10,6 +10,9 @@ config.json
 config.tmp
 .env
 
+# Messdaten des Speed-Tests (lokal, pro Rechner)
+data/
+
 # Logs
 *.log
 

@@ -9,6 +9,14 @@
   --ok: #1f9d55;
   --err: #d33a3a;
   --final: #fff8e1;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -20,6 +28,14 @@
     --border: #2f3440;
     --accent: #6b82ff;
     --final: #2c2716;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     color-scheme: dark;
   }
 }
@@ -52,6 +68,7 @@ textarea, input, select {
 input[type=checkbox] { display: inline; width: auto; margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .row > label { flex: 1 1 180px; }
+.row > label.compact { flex: 0 0 200px; margin-bottom: 0; }
 .field > span { font-weight: 600; font-size: 13px; }
 .model-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
 .model-list label { margin: 0; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; font-weight: normal; font-size: 13px; cursor: pointer; }
@@ -82,6 +99,26 @@ table { width: 100%; border-collapse: collapse; background: var(--panel); border
 th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 tr.best td { font-weight: 700; }
+
+h3 { font-size: 13px; margin: 14px 0 4px; color: var(--muted); }
+.grow { flex: 1 1 auto; align-self: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin-bottom: 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-wrap { position: relative; }
+.chart { display: block; overflow: visible; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { stroke: var(--muted); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
+.chart .label { fill: var(--text); font-size: 12px; }
+.chart .dot { stroke: var(--panel); stroke-width: 2; }
+.chart .hair { stroke: var(--muted); stroke-width: 1; }
+.tooltip {
+  position: absolute; top: 4px; pointer-events: none; z-index: 2; min-width: 160px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 14px rgba(0, 0, 0, .12);
+}
+.tooltip > div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tooltip .tip-head { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 
 .chat-log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .chat-log .card.user { align-self: flex-end; max-width: 85%; background: var(--bg); }
