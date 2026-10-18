@@ -410,6 +410,29 @@ $('chat-text').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !$('chat-send').disabled) { e.preventDefault(); runChat(); }
 });
 $('chat-new').addEventListener('click', () => { chatHistory = []; $('chat-log').replaceChildren(); });
+// The system prompt saves itself shortly after typing stops, and on page reload/close.
+let systemTimer = null;
+function saveSystemPrompt(keepalive = false) {
+  clearTimeout(systemTimer);
+  systemTimer = null;
+  const system = $('chat-system').value;
+  if (system === state.config.chat.system) return;
+  state.config.chat.system = system;
+  fetch('/api/config', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat: { system } }), keepalive,
+  }).then((res) => {
+    $('chat-system-msg').textContent = res.ok ? '· gespeichert' : '· Speichern fehlgeschlagen';
+  }).catch(() => {});
+}
+$('chat-system').addEventListener('input', () => {
+  $('chat-system-msg').textContent = '';
+  clearTimeout(systemTimer);
+  systemTimer = setTimeout(saveSystemPrompt, 600);
+});
+$('chat-system').addEventListener('blur', () => saveSystemPrompt());
+window.addEventListener('pagehide', () => { if (systemTimer) saveSystemPrompt(true); });
+
 $('chat-save').addEventListener('click', (e) => flash(e.target, () => {
   Object.assign(state.config.chat, { model: $('chat-model').value, system: $('chat-system').value });
   return saveConfig();

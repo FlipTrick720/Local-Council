@@ -29,6 +29,11 @@ def load() -> dict:
     return _merge(defaults(), json.loads(CONFIG_PATH.read_text("utf-8")))
 
 
+def update(partial: dict) -> dict:
+    """Merges a partial config (e.g. {"chat": {"system": "..."}}) into the stored one."""
+    return save(_merge(load(), partial))
+
+
 def save(cfg: dict) -> dict:
     merged = _merge(defaults(), cfg)
     tmp = CONFIG_PATH.with_suffix(".tmp")

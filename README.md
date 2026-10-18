@@ -83,6 +83,9 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
 Der Tab **Einstellungen** bearbeitet Ollama-URL, `keep_alive`, Timeout und Modelloptionen und zeigt die installierten Modelle an.
 Ist `council.synthesizer` leer, fasst das erste Ratsmitglied zusammen.
 
+Der **System-Prompt im Chat** wird beim Tippen automatisch in `config.json` gespeichert. Er übersteht also
+F5 und einen Neustart und gilt auf allen Geräten im Heimnetz.
+
 ### Hinweise zu Parallelität und Messwerten
 
 - Ollama verarbeitet gleichzeitige Anfragen nur so weit parallel, wie Speicher und die Variablen

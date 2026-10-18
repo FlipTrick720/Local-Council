@@ -66,7 +66,7 @@ def get_config():
 
 @app.put("/api/config")
 def put_config(cfg: dict):
-    return config.save(cfg)
+    return config.update(cfg)
 
 
 @app.get("/api/models")
