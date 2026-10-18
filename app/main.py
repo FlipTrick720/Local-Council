@@ -92,6 +92,15 @@ def get_speedtest_history():
     return history.load_all()
 
 
+class PruneRequest(BaseModel):
+    keep: int = Field(default=3, ge=0)
+
+
+@app.post("/api/speedtest/history/prune")
+def prune_speedtest_history(req: PruneRequest):
+    return {"removed": history.prune(req.keep)}
+
+
 @app.post("/api/council")
 def post_council(req: CouncilRequest):
     cfg = config.load()

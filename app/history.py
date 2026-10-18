@@ -34,6 +34,29 @@ def append(row: dict) -> None:
         writer.writerow(row)
 
 
+def prune(keep: int) -> int:
+    """Keeps only the newest `keep` rows per mode in every CSV. Returns the number of removed rows."""
+    removed = 0
+    for path in DATA_DIR.glob("*.csv"):
+        with path.open(newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fields, rows = reader.fieldnames or FIELDS, list(reader)
+        kept = []
+        for mode in dict.fromkeys(r.get("mode") for r in rows):
+            kept += [r for r in rows if r.get("mode") == mode][-keep:] if keep else []
+        kept.sort(key=lambda r: r.get("timestamp") or "")
+        if len(kept) == len(rows):
+            continue
+        removed += len(rows) - len(kept)
+        tmp = path.with_suffix(".tmp")
+        with tmp.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(kept)
+        tmp.replace(path)
+    return removed
+
+
 def _parse(value: str):
     if value in ("", None):
         return None

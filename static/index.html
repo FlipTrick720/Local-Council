@@ -51,6 +51,10 @@
         <div id="hist-seq"></div>
         <h3>Gleichzeitig</h3>
         <div id="hist-par"></div>
+        <div class="actions">
+          <button id="hist-prune" class="ghost">Verlauf kürzen: nur die letzten 3 Läufe pro Modell behalten</button>
+          <span id="hist-msg" class="hint"></span>
+        </div>
         <p class="hint">Jeder Punkt ist ein Lauf. Die Rohdaten liegen pro Modell in <code>data/speedtest/*.csv</code>.
           Nach einem Modell-Update (<code>ollama pull</code>) beginnt die Linie neu.</p>
       </div>

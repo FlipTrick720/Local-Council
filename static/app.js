@@ -288,6 +288,16 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(renderSpeedHistory, 150);
 });
 $('hist-metric').addEventListener('change', renderSpeedHistory);
+$('hist-prune').addEventListener('click', async () => {
+  if (!confirm('Ältere Messungen löschen? Pro Modell bleiben die letzten 3 Läufe „nacheinander“ und die letzten 3 „gleichzeitig“ erhalten.')) return;
+  try {
+    const { removed } = await api('/api/speedtest/history/prune', { method: 'POST', body: { keep: 3 } });
+    $('hist-msg').textContent = `${removed} Messungen gelöscht.`;
+  } catch (e) {
+    $('hist-msg').textContent = 'Fehler: ' + e.message;
+  }
+  loadSpeedHistory();
+});
 $('speed-run').addEventListener('click', runSpeed);
 $('speed-save').addEventListener('click', (e) => flash(e.target, () => {
   Object.assign(state.config.speedtest, {

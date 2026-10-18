@@ -107,7 +107,11 @@ z. B. `data/speedtest/llama3.1_8b.csv`. Der Ordner steht in `.gitignore`.
 
 Neue Modelle bekommen automatisch eine eigene Datei und Farbe. Wird ein Modell aktualisiert, beginnt
 seine Linie im Diagramm neu, und der Tooltip zeigt „neue Version“. Ein „Gleichzeitig“-Lauf mit nur einem Modell
-zählt als „nacheinander“. Zum Zurücksetzen einfach die CSV-Dateien löschen.
+zählt als „nacheinander“.
+
+Wird der Verlauf zu voll, löscht der Button **„Verlauf kürzen“** alle älteren Messungen. Pro Modell bleiben die
+letzten 3 Läufe je Modus erhalten (3 × nacheinander, 3 × gleichzeitig). Zum kompletten Zurücksetzen einfach die
+CSV-Dateien löschen.
 
 ## Projektstruktur
 
@@ -147,6 +151,7 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | GET / PUT | `/api/config` | Konfiguration lesen / speichern |
 | POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream |
 | GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen |
+| POST | `/api/speedtest/history/prune` | `{keep: 3}` → behält pro Modell und Modus nur die neuesten `keep` Messungen |
 | POST | `/api/council` | `{question, members?, synthesizer?, rounds?, parallel?}` → NDJSON-Stream |
 | POST | `/api/chat` | `{messages: [{role, content}], model?, system?}` → NDJSON-Stream |
 
