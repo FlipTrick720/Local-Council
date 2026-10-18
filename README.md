@@ -9,9 +9,104 @@ Sie läuft auf einem Rechner im Heimnetz und ist von allen Geräten unter `http:
 |---|---|
 | **Speed-Test** | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. Jeder Lauf wird pro Modell als CSV gespeichert, und zwei Verlaufsdiagramme (nacheinander / gleichzeitig) zeigen die Entwicklung. |
 | **Council** | Mehrere Modelle beantworten eine Frage. Danach sehen sie die (anonymisierten) Antworten der anderen, diskutieren über N Runden (Standard: 2) und überarbeiten ihre Antwort. Zum Schluss fasst ein wählbares Modell alles zu einer finalen Antwort zusammen. |
-| **Chat** | Normaler Chat mit einem frei wählbaren Modell, optional mit System-Prompt. |
+| **Chat** | Chat mit gespeicherten Unterhaltungen, Markdown- und Code-Darstellung, Stopp/Neu generieren und einem eigenen Modell pro Chat. |
 
 Alle Ausgaben werden live gestreamt. Bei „Thinking“-Modellen (z. B. qwen3, deepseek-r1) erscheint der Gedankengang einklappbar über der Antwort.
+
+## Chat
+
+- **Gespeicherte Chats:** Jede Unterhaltung liegt als JSON-Datei in `data/chats/<id>.json` (nicht im Git) und ist
+  von jedem Gerät im Heimnetz aus erreichbar. Die Liste links zeigt alle Chats, der zuletzt geöffnete wird nach F5
+  wieder geöffnet. Ein Chat wird mit der ersten Nachricht gespeichert und bekommt deren Anfang als Titel.
+- **Titel:** Nach der ersten Antwort schreibt ein Modell einen kurzen Titel (abschaltbar unter Einstellungen →
+  Chat-Titel, dort auch ein eigenes, schnelles Modell dafür). Umbenennen per ✎ in der Liste, „Umbenennen“ oder
+  Doppelklick auf den Titel; selbst vergebene Titel werden nicht überschrieben.
+- **Suche:** Das Suchfeld über der Liste durchsucht Titel, alle Nachrichten und Dateinamen aller Chats. Treffer
+  erscheinen mit Textausschnitt; ein Klick öffnet den Chat an der passenden Nachricht. Esc leert die Suche.
+- **Export:** „Markdown“ / „JSON“ oben im Chat laden den Chat herunter (Markdown lesbar, inkl. Gedankengang;
+  JSON vollständig). „Alle Chats exportieren (ZIP)“ unter der Liste packt alle Chats in beiden Formaten.
+- **Modell pro Chat:** Das Modell oben gilt für die nächsten Antworten dieses Chats. Man kann es mitten im Chat
+  wechseln; jede Antwort zeigt, von welchem Modell sie stammt. „Als Standard für neue Chats“ legt das Modell für
+  neue Chats fest.
+- **Stopp / Neu generieren:** „Stopp“ (oder Esc) bricht ab, die Teilantwort bleibt gespeichert. „Neu generieren“
+  verwirft die letzte Antwort und erzeugt sie mit dem gerade gewählten Modell neu. Nach einem Fehler heißt der
+  Button „Erneut versuchen“.
+- **Markdown und Code:** Antworten werden als Markdown dargestellt, Codeblöcke mit Syntax-Hervorhebung und
+  „Kopieren“-Button. Die Bibliotheken (marked, DOMPurify, highlight.js) liegen in `static/vendor/`; die App braucht
+  also kein Internet. HTML in Antworten wird mit DOMPurify bereinigt.
+- **System-Prompt, Vorlagen und Einstellungen** (aufklappbar über dem Chat): gelten pro Chat und werden mit ihm
+  gespeichert. Vorlagen sind gespeicherte System-Prompts (in `config.json` unter `chat.presets`, drei Beispiele sind
+  dabei). Generierungs-Einstellungen: Temperatur, top_p, top_k, repeat_penalty, Kontextlänge (`num_ctx`),
+  maximale Antwortlänge (`num_predict`) und Seed. Leere Felder nehmen die Modell-Optionen aus den Einstellungen bzw.
+  den Standard des Modells. „Denken“ schaltet bei Thinking-Modellen (qwen3, deepseek-r1 …) das Nachdenken an oder
+  aus. „Modell & Einstellungen als Standard für neue Chats“ speichert alles als Vorgabe für neue Chats.
+- **Gedankengang:** Bei Thinking-Modellen läuft der Gedankengang live in einem aufgeklappten Bereich mit und wird
+  eingeklappt, sobald die Antwort beginnt. Danach steht dort, wie lange das Modell nachgedacht hat.
+- **Geschwindigkeit:** Während der Antwort zeigt die Statuszeile Tokens und ~Tokens/s live. Unter jeder Antwort
+  stehen Tokens/s, Anzahl Tokens, Zeit bis zum ersten Token, Gesamtzeit, belegter Kontext und ggf. die Ladezeit.
+- **Modell laden/entladen:** Neben der Modellauswahl steht, ob das Modell im Speicher ist (Größe, GPU/CPU, bis
+  wann). „Jetzt laden“ lädt es vorab, „Entladen“ gibt den Speicher sofort frei. Unter Einstellungen →
+  „Im Speicher“ stehen alle geladenen Modelle.
+- **Dateien anhängen:** über 📎, per Einfügen (Strg+V) oder durch Hineinziehen in den Chat.
+  - **Textdateien** (txt, md, csv, json, Quellcode …) und **PDFs** werden beim Hochladen in Text umgewandelt
+    (PDF mit `pypdf`) und vor der Frage an das Modell geschickt. Eingescannte PDFs ohne Textebene gehen nicht.
+  - **Bilder** (PNG, JPEG, WebP, GIF) gehen an Vision-Modelle (z. B. gemma3, llava, qwen2.5vl). Große Fotos
+    verkleinert der Browser vorher auf 1536 px. Kann das gewählte Modell keine Bilder, erscheint ein Hinweis
+    und nichts wird gesendet.
+  - Eingefügter Text über 8000 Zeichen wird automatisch zur Datei „Eingefügter Text.txt“.
+  - Dateien liegen in `data/uploads/` (max. 20 MB pro Datei). Dateien, die zu keinem Chat mehr gehören, werden beim
+    Löschen eines Chats mit aufgeräumt.
+- **Kontext-Anzeige:** Neben der Statuszeile steht, wie viel vom Kontextfenster die nächste Anfrage etwa belegt
+  (`Kontext ~3.1k / 4k`). Ab 80 % erscheint eine Warnung, über 100 % der Hinweis, dass Ollama den Anfang des Chats
+  abschneidet, mit der Empfehlung, die Kontextlänge zu erhöhen (inkl. Maximum des Modells) oder neu zu beginnen.
+  Achtung: Ohne eigene Einstellung nutzt Ollama nur 4096 Tokens, das reicht für längere PDFs nicht.
+- **Wissensbasen (RAG):** siehe unten.
+- **Werkzeuge:** Mit „Werkzeuge“ darf das Modell selbst einen Rechner (exakte Arithmetik), Datum/Uhrzeit und –
+  falls Websuche eingerichtet ist – Websuche und „Webseite lesen“ aufrufen. Geht nur mit Modellen, die Tool-Calling
+  können (z. B. qwen3, llama3.1, qwen2.5, mistral-nemo); bei anderen erscheint ein Hinweis. Die Aufrufe und ihre
+  Ergebnisse stehen aufklappbar über der Antwort.
+- **Websuche:** Mit „Websuche“ wird gesucht (SearXNG, siehe unten). Mit Werkzeugen entscheidet das Modell selbst,
+  wann und wonach es sucht; ohne Werkzeuge wird einmal mit der Frage gesucht und die Treffer werden mitgeschickt.
+  Die Treffer stehen als Quellen unter der Antwort.
+- **Status:** Unter dem Chat steht, was gerade passiert (Modell wird geladen, denkt nach, schreibt, fertig mit
+  Tokens/s) oder welcher Fehler aufgetreten ist (Modell nicht installiert, Ollama oder Server nicht erreichbar).
+
+## Wissensbasen (RAG)
+
+Unter **Einstellungen → Wissensbasen** legt man Sammlungen von Dokumenten an (PDF, Text, Markdown, Quellcode …).
+Jedes Dokument wird in Abschnitte von ca. 1200 Zeichen geteilt und mit einem lokalen **Embedding-Modell**
+eingelesen. Im Chat wählt man unter „System-Prompt & Einstellungen“ eine Wissensbasis; zu jeder Frage werden dann
+die passendsten Abschnitte (Standard: 5) vor die Frage gesetzt. Das Modell soll sie mit [1], [2] … zitieren, und
+unter der Antwort stehen die Quellen mit Datei, Seite und Ähnlichkeit.
+
+- Embedding-Modell: Standard ist **bge-m3** (mehrsprachig, gut für Deutsch): `ollama pull bge-m3`. Jede
+  Wissensbasis merkt sich ihr Modell; ein anderes Modell gilt nur für neue Wissensbasen.
+- Suche: Ähnlichkeit der Embeddings plus ein Bonus für exakt vorkommende seltene Wörter (Fehlercodes, Namen,
+  Artikelnummern), die Embeddings allein oft verfehlen.
+- Gespeichert in `data/rag/<id>/` (Abschnitte als JSON, Vektoren als `.npy`, dafür wird numpy gebraucht).
+- Embedding-Modelle tauchen in den Modell-Listen von Speed-Test, Council und Chat nicht auf, da sie nicht chatten
+  können.
+
+## Websuche (optional, SearXNG)
+
+Die Websuche nutzt eine eigene [SearXNG](https://docs.searxng.org/)-Instanz, z. B. per Docker:
+
+```bash
+mkdir -p ~/searxng && docker run -d --name searxng --restart unless-stopped \
+  -p 8888:8080 -v ~/searxng:/etc/searxng searxng/searxng
+```
+
+In `~/searxng/settings.yml` muss das JSON-Format erlaubt sein (danach `docker restart searxng`):
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+Dann unter **Einstellungen → Websuche** die URL eintragen (z. B. `http://127.0.0.1:8888`) und „Verbindung testen“.
+Das Werkzeug „Webseite lesen“ ruft nur öffentliche Adressen ab, nie Geräte im Heimnetz.
 
 ## Voraussetzungen
 
@@ -36,7 +131,8 @@ cd Local-Council
 ```
 
 Beim ersten Start legt `run.sh` die virtuelle Umgebung `.venv` an und installiert die Abhängigkeiten
-(FastAPI, uvicorn, httpx). Danach startet der Server auf `0.0.0.0:8080`.
+(FastAPI, uvicorn, httpx, pypdf, numpy). Ändert sich `requirements.txt` (z. B. nach einem `git pull`), installiert
+`run.sh` die Abhängigkeiten beim nächsten Start automatisch nach. Danach startet der Server auf `0.0.0.0:8080`.
 
 - Auf dem Rechner selbst: <http://localhost:8080>
 - Im Heimnetz: `http://<IP-des-Rechners>:8080` (IP z. B. mit `hostname -I` herausfinden)
@@ -70,7 +166,15 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
   },
   "speedtest": { "models": [], "parallel": true, "prompt": "…" },
   "council":   { "members": [], "synthesizer": "", "rounds": 2, "parallel": true },
-  "chat":      { "model": "", "system": "" }
+  "chat": {
+    "model": "", "system": "", "options": {}, "think": null,   // Vorgaben für neue Chats …
+    "knowledge": null, "tools": false, "web": false,           // … inkl. Wissensbasis, Werkzeuge, Websuche
+    "presets": [{ "name": "…", "system": "…" }],               // System-Prompt-Vorlagen
+    "auto_title": true, "title_model": ""                      // automatische Titel
+  },
+  "rag": { "embed_model": "bge-m3", "top_k": 5 },              // Wissensbasen
+  "web": { "searxng_url": "", "max_results": 5 },              // Websuche
+  "auth": { "password_hash": "", "secret": "" }                // nur über Einstellungen/CLI ändern
 }
 ```
 
@@ -135,17 +239,37 @@ Local-Council/
 │   ├── config.py        # config.json laden/speichern
 │   ├── ollama.py        # Ollama-Client (Modelle auflisten, Chat streamen, Messwerte)
 │   ├── history.py       # Speed-Test-Verlauf als CSV pro Modell
+│   ├── chats.py         # gespeicherte Chats als JSON pro Chat
+│   ├── uploads.py       # Dateianhänge: speichern, Text aus PDFs ziehen, für Ollama aufbereiten
+│   ├── titles.py        # automatische Chat-Titel
+│   ├── export.py        # Export als Markdown/JSON/ZIP
+│   ├── auth.py          # optionales Passwort (Hash, signiertes Cookie)
+│   ├── rag.py           # Wissensbasen: Abschnitte, Embeddings, Suche
+│   ├── tools.py         # Werkzeuge für Tool-Calling (Rechner, Datum, Web)
+│   ├── websearch.py     # SearXNG-Suche, Webseiten als Text (nur öffentliche Adressen)
 │   └── modes/
 │       ├── runner.py    # gemeinsamer Baustein: Jobs parallel/seriell ausführen, Streams zusammenführen
 │       ├── speedtest.py # Modus 1
 │       ├── council.py   # Modus 2 (inkl. Prompts für Diskussion & Zusammenfassung)
-│       └── chat.py      # Modus 3
+│       └── chat.py      # Modus 3: Wissensbasis, Websuche und Werkzeug-Schleife um die Antwort
 ├── static/              # Frontend: reines HTML/CSS/JS, kein Build-Schritt
 │   ├── index.html
 │   ├── style.css
+│   ├── core.js          # gemeinsame Helfer: API, NDJSON-Stream, Autosave, Kopieren
+│   ├── theme.js         # Hell/Dunkel/Auto
+│   ├── auth.js          # Anmeldung, Passwort setzen
 │   ├── chart.js         # kleines SVG-Liniendiagramm (keine externe Bibliothek)
-│   └── app.js
-├── data/speedtest/      # CSV-Messdaten (wird automatisch angelegt, nicht im Git)
+│   ├── markdown.js      # Markdown → bereinigtes HTML mit Code-Hervorhebung
+│   ├── chat.js          # Chat-Tab: Chatliste, Nachrichten, Streaming
+│   ├── chat-settings.js # System-Prompt, Vorlagen, Generierungs-Einstellungen pro Chat
+│   ├── models.js        # Modelle im Speicher: laden/entladen, Fähigkeiten
+│   ├── attachments.js   # Dateien anhängen: Button, Einfügen, Ziehen
+│   ├── context.js       # Kontext-Anzeige und Warnung
+│   ├── chat-tools.js    # Suche, Umbenennen, Export, Auto-Titel, Chatliste auf dem Handy
+│   ├── rag.js           # Wissensbasen und Websuche (Einstellungen)
+│   ├── app.js           # Speed-Test, Council, Einstellungen, Start
+│   └── vendor/          # marked, DOMPurify, highlight.js (unverändert, mit Lizenz-Hinweis)
+├── data/                # Messdaten, Chats, Anhänge, Wissensbasen (rag/), nicht im Git
 ├── config.example.json  # Standardkonfiguration (Vorlage für config.json)
 ├── requirements.txt
 └── run.sh
@@ -160,12 +284,30 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | Methode | Pfad | Body / Antwort |
 |---|---|---|
 | GET | `/api/models` | installierte Ollama-Modelle |
+| GET | `/api/models/loaded` | Modelle, die Ollama gerade im Speicher hat |
+| POST | `/api/models/load`, `/api/models/unload` | `{model}` → Modell laden / sofort entladen |
+| POST | `/api/models/show` | `{model}` → Fähigkeiten (`vision`, `thinking`, `tools`) und maximale Kontextlänge |
 | GET / PUT | `/api/config` | Konfiguration lesen / speichern |
 | POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream |
 | GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen |
 | POST | `/api/speedtest/history/prune` | `{keep: 3}` → behält pro Modell und Modus nur die neuesten `keep` Messungen |
 | POST | `/api/council` | `{question, members?, synthesizer?, rounds?, parallel?}` → NDJSON-Stream |
-| POST | `/api/chat` | `{messages: [{role, content}], model?, system?}` → NDJSON-Stream |
+| POST | `/api/chat` | `{messages: [{role, content, attachments?}], model?, system?, options?, think?, knowledge?, tools?, web?}` → NDJSON-Stream |
+| POST | `/api/uploads?name=…` | Datei als roher Body → Metadaten mit `id` (für `attachments`) |
+| GET | `/api/uploads/{id}` | die hochgeladene Datei |
+| GET | `/api/chats` | Liste der gespeicherten Chats (id, title, model, created, updated, count) |
+| GET / PUT / PATCH / DELETE | `/api/chats/{id}` | einen Chat lesen / speichern / einzelne Felder ändern / löschen |
+| GET | `/api/chats/search?q=…` | Volltextsuche über alle Chats |
+| GET | `/api/chats/{id}/export?format=md\|json` | einen Chat herunterladen |
+| GET | `/api/chats/export` | alle Chats als ZIP |
+| POST | `/api/chats/title` | `{model, question, answer}` → `{title}` |
+| GET / POST | `/api/rag` | Wissensbasen auflisten / `{name}` anlegen |
+| DELETE | `/api/rag/{id}` | Wissensbasis löschen |
+| POST | `/api/rag/{id}/documents` | `{upload_id}` einlesen → NDJSON-Fortschritt |
+| DELETE | `/api/rag/{id}/documents/{upload_id}` | Dokument entfernen |
+| POST | `/api/web/test` | SearXNG-Verbindung prüfen |
+| GET / POST | `/api/auth`, `/api/login`, `/api/logout` | Anmeldestatus, anmelden, abmelden |
+| PUT | `/api/auth/password` | `{password}` setzen, leer = Passwortschutz aus |
 
 Felder mit `?` fallen auf die Werte aus `config.json` zurück. Beispiel:
 
@@ -203,7 +345,23 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload && sudo systemctl enable --now local-council
 ```
 
-## Sicherheit
+## Darstellung: Hell/Dunkel und Handy
 
-Die App hat **keine Anmeldung**. Jeder im Netz, der den Port erreicht, kann die Modelle nutzen und die
-Konfiguration ändern. Sie ist fürs Heimnetz gedacht. Den Port deshalb nicht ins Internet weiterleiten.
+- Der Knopf oben rechts schaltet das Farbschema um: **Auto** (wie das System) → **Hell** → **Dunkel**. Die Wahl
+  gilt pro Gerät/Browser.
+- Auf schmalen Bildschirmen (Handy) liegt die Chatliste hinter „☰ Chats“, die Tabs lassen sich wischen und
+  Eingabefelder zoomen auf iOS nicht ungewollt hinein.
+
+## Sicherheit und Passwort
+
+Ohne Passwort kann jeder im Netz, der den Port erreicht, die App benutzen und die Konfiguration ändern. Optional
+lässt sich ein **Passwort** setzen:
+
+- unter **Einstellungen → Passwort**, oder auf dem Server mit `.venv/bin/python -m app --set-password`.
+- Danach fragt jedes Gerät einmal nach dem Passwort und bleibt 30 Tage angemeldet („Abmelden“ oben rechts).
+  Ein neues Passwort meldet alle anderen Geräte ab.
+- Gespeichert wird nur ein Hash (PBKDF2) in `config.json` unter `auth`; die API gibt ihn nie heraus.
+- Passwort vergessen: `.venv/bin/python -m app --remove-password`.
+
+Die Verbindung ist unverschlüsselt (HTTP). Das Passwort schützt im Heimnetz vor Mitbenutzung, ersetzt aber kein
+HTTPS. Den Port deshalb nicht ins Internet weiterleiten.

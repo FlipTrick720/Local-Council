@@ -11,6 +11,8 @@ class Job:
     model: str
     messages: list[dict]
     tag: dict = field(default_factory=dict)  # copied into every event, e.g. {"stage": "initial"}
+    options: dict | None = None  # per-job Ollama options on top of the configured ones
+    think: bool | None = None
 
 
 async def stream_job(client: OllamaClient, job: Job) -> AsyncIterator[dict]:
@@ -18,7 +20,7 @@ async def stream_job(client: OllamaClient, job: Job) -> AsyncIterator[dict]:
     parts: list[str] = []
     stats = None
     try:
-        async for chunk in client.chat_stream(job.model, job.messages):
+        async for chunk in client.chat_stream(job.model, job.messages, job.options, job.think):
             if chunk["type"] == "stats":
                 stats = chunk
                 stats.pop("type")

@@ -25,6 +25,39 @@
   },
   "chat": {
     "model": "",
-    "system": ""
+    "system": "",
+    "options": {},
+    "think": null,
+    "presets": [
+      {
+        "name": "Knapp auf Deutsch",
+        "system": "Antworte immer auf Deutsch, knapp und präzise. Keine Einleitungsfloskeln."
+      },
+      {
+        "name": "Code-Assistent",
+        "system": "Du bist ein erfahrener Softwareentwickler. Antworte mit lauffähigem, kommentiertem Code und erkläre kurz die wichtigsten Entscheidungen."
+      },
+      {
+        "name": "Übersetzer",
+        "system": "Übersetze jede Nachricht ins Englische, wenn sie auf Deutsch ist, und sonst ins Deutsche. Gib nur die Übersetzung aus."
+      }
+    ],
+    "auto_title": true,
+    "title_model": "",
+    "knowledge": null,
+    "tools": false,
+    "web": false
+  },
+  "rag": {
+    "embed_model": "bge-m3",
+    "top_k": 5
+  },
+  "web": {
+    "searxng_url": "",
+    "max_results": 5
+  },
+  "auth": {
+    "password_hash": "",
+    "secret": ""
   }
 }

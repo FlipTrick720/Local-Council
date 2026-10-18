@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local Council</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Theme before the first paint, so dark mode does not flash white. The toggle lives in theme.js.
+    (() => {
+      let theme = 'auto';
+      try { theme = localStorage.getItem('local-council.theme') || 'auto'; } catch { /* private mode */ }
+      const dark = theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
 </head>
 <body>
   <header>
@@ -16,7 +25,20 @@
       <button data-tab="settings">Einstellungen</button>
     </nav>
     <span id="status" class="status" title="Verbindung zu Ollama">…</span>
+    <button id="theme" class="ghost icon-btn" type="button" title="Farbschema: Auto / Hell / Dunkel"></button>
+    <button id="logout" class="ghost" type="button" hidden>Abmelden</button>
   </header>
+
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="panel">
+      <h2>Local Council</h2>
+      <label>Passwort <input type="password" id="login-password" autocomplete="current-password"></label>
+      <div class="actions">
+        <button class="primary" type="submit">Anmelden</button>
+        <span id="login-msg" class="error"></span>
+      </div>
+    </form>
+  </div>
 
   <main>
     <!-- Speed-Test -->
@@ -95,24 +117,88 @@
     </section>
 
     <!-- Chat -->
-    <section id="tab-chat" class="tab chat" hidden>
-      <div class="panel">
-        <div class="row">
-          <label>Modell <select id="chat-model"></select></label>
-          <button id="chat-save" class="ghost">Als Standard speichern</button>
-          <button id="chat-new">Neuer Chat</button>
+    <section id="tab-chat" class="tab" hidden>
+      <div class="chat-layout">
+        <div id="chat-backdrop" class="drawer-backdrop" hidden></div>
+        <aside id="chat-side" class="panel chat-side">
+          <button id="chat-new" class="primary" type="button">+ Neuer Chat</button>
+          <input id="chat-search" type="search" placeholder="Chats durchsuchen …" autocomplete="off">
+          <div id="chat-list" class="chat-list"></div>
+          <button id="chat-export-all" class="ghost small" type="button">Alle Chats exportieren (ZIP)</button>
+        </aside>
+        <div class="chat-main">
+          <div class="panel">
+            <div class="chat-top">
+              <button id="chat-drawer" class="ghost" type="button" title="Chatliste">☰ Chats</button>
+              <strong id="chat-title" class="chat-heading" title="Doppelklick zum Umbenennen"></strong>
+              <span class="chat-top-actions">
+                <button id="chat-rename" class="ghost small" type="button">Umbenennen</button>
+                <a id="chat-export-md" class="button ghost small" download>Markdown</a>
+                <a id="chat-export-json" class="button ghost small" download>JSON</a>
+              </span>
+            </div>
+            <div class="row">
+              <label>Modell für diesen Chat <select id="chat-model"></select></label>
+              <div class="mem">
+                <span id="chat-mem" class="hint"></span>
+                <button id="chat-load" class="ghost" type="button" hidden>Jetzt laden</button>
+                <button id="chat-unload" class="ghost" type="button" hidden>Entladen</button>
+                <span id="chat-mem-msg" class="error"></span>
+              </div>
+            </div>
+            <details id="chat-settings">
+              <summary>System-Prompt &amp; Einstellungen <span id="chat-settings-sum" class="hint"></span><span id="chat-settings-msg" class="hint"></span></summary>
+              <div class="row">
+                <label>Vorlage <select id="chat-preset"></select></label>
+                <button id="preset-save" class="ghost" type="button">Als Vorlage speichern …</button>
+                <button id="preset-delete" class="ghost" type="button">Vorlage löschen</button>
+              </div>
+              <label>System-Prompt
+                <textarea id="chat-system" rows="3" placeholder="Optional, z. B. „Antworte knapp und auf Deutsch.“"></textarea>
+              </label>
+              <div id="chat-gen" class="row gen">
+                <label title="Nur für Thinking-Modelle wie qwen3 oder deepseek-r1">Denken
+                  <select id="chat-think">
+                    <option value="">Modell-Standard</option>
+                    <option value="true">an</option>
+                    <option value="false">aus</option>
+                  </select>
+                </label>
+              </div>
+              <div class="row">
+                <label>Wissensbasis (RAG)
+                  <select id="chat-knowledge"></select>
+                </label>
+                <label class="check"><input type="checkbox" id="chat-tools"> Werkzeuge
+                  <small>(Rechner, Datum; mit Websuche auch Web und Webseiten lesen)</small></label>
+                <label class="check"><input type="checkbox" id="chat-web"> Websuche</label>
+              </div>
+              <p class="hint">Gilt nur für diesen Chat und wird mit ihm gespeichert. Leere Felder nehmen den Wert aus
+                Einstellungen → Modell-Optionen oder den Standard des Modells.</p>
+              <div class="actions">
+                <button id="chat-save" class="ghost" type="button">Modell &amp; Einstellungen als Standard für neue Chats</button>
+              </div>
+            </details>
+          </div>
+          <div id="chat-log" class="chat-log"></div>
+          <div class="chat-dock">
+            <div id="chat-attach" class="attach-list"></div>
+            <div id="chat-attach-msg" class="ctx-warn" hidden></div>
+            <div id="chat-ctx-warn" class="ctx-warn" hidden></div>
+            <div class="dock-info">
+              <div id="chat-status" class="chat-status"></div>
+              <div id="chat-ctx" class="ctx"></div>
+            </div>
+            <form id="chat-form" class="chat-input">
+              <button type="button" id="chat-file" class="ghost" title="Datei anhängen: Text, PDF oder Bild. Geht auch per Einfügen (Strg+V) oder Hineinziehen.">📎</button>
+              <input type="file" id="chat-file-input" multiple hidden>
+              <textarea id="chat-text" rows="2" placeholder="Nachricht … (Enter senden, Shift+Enter Zeilenumbruch, Esc stoppt)"></textarea>
+              <button type="submit" id="chat-send" class="primary">Senden</button>
+              <button type="button" id="chat-stop" disabled>Stopp</button>
+            </form>
+          </div>
         </div>
-        <details>
-          <summary>System-Prompt <span id="chat-system-msg" class="hint"></span></summary>
-          <textarea id="chat-system" rows="3" placeholder="Optional, z. B. „Antworte knapp und auf Deutsch.“ Wird automatisch gespeichert."></textarea>
-        </details>
       </div>
-      <div id="chat-log" class="chat-log"></div>
-      <form id="chat-form" class="chat-input">
-        <textarea id="chat-text" rows="2" placeholder="Nachricht … (Enter senden, Shift+Enter Zeilenumbruch)"></textarea>
-        <button type="submit" id="chat-send" class="primary">Senden</button>
-        <button type="button" id="chat-stop" disabled>Stopp</button>
-      </form>
     </section>
 
     <!-- Einstellungen -->
@@ -133,13 +219,84 @@
         </div>
       </div>
       <div class="panel">
+        <strong>Chat-Titel</strong>
+        <label class="check"><input type="checkbox" id="set-autotitle"> Titel nach der ersten Antwort automatisch erzeugen</label>
+        <label>Modell für Titel
+          <select id="set-titlemodel"></select>
+        </label>
+        <p class="hint">Ein kleines, schnelles Modell (z. B. gemma3:4b) spart Zeit. Ohne Auswahl schreibt das Modell des Chats den Titel.</p>
+      </div>
+      <div class="panel">
+        <strong>Wissensbasen (RAG)</strong>
+        <p class="hint">Dokumente (PDF, Text, Markdown …) einmal einlesen und im Chat unter „System-Prompt &amp;
+          Einstellungen“ als Wissensbasis wählen. Zu jeder Frage werden dann die passendsten Ausschnitte mitgeschickt
+          und unter der Antwort als Quellen angezeigt.</p>
+        <div class="row">
+          <label>Embedding-Modell für neue Wissensbasen <select id="rag-model"></select></label>
+          <label class="compact">Ausschnitte pro Frage <input type="number" id="rag-topk" min="1" max="20"></label>
+        </div>
+        <div id="rag-list" class="rag-list"></div>
+        <div class="row">
+          <label>Neue Wissensbasis <input id="rag-name" placeholder="Name, z. B. Handbücher"></label>
+          <button id="rag-create" type="button">Anlegen</button>
+        </div>
+        <span id="rag-msg" class="hint"></span>
+      </div>
+      <div class="panel">
+        <strong>Websuche (optional)</strong>
+        <label>SearXNG-URL <input id="web-url" placeholder="http://192.168.178.10:8888"></label>
+        <div class="actions">
+          <button id="web-test" type="button">Verbindung testen</button>
+          <span id="web-msg" class="hint"></span>
+        </div>
+        <p class="hint">Braucht eine eigene <a href="https://docs.searxng.org/" target="_blank" rel="noopener">SearXNG</a>-Instanz
+          mit JSON-Ausgabe (siehe README). Danach im Chat „Websuche“ anhaken.</p>
+      </div>
+      <div class="panel">
+        <strong>Passwort</strong>
+        <p id="pw-state" class="hint"></p>
+        <div class="row">
+          <label>Neues Passwort <input type="password" id="pw-new" autocomplete="new-password"></label>
+          <label>Wiederholen <input type="password" id="pw-repeat" autocomplete="new-password"></label>
+        </div>
+        <div class="actions">
+          <button id="pw-set" type="button">Passwort setzen</button>
+          <button id="pw-remove" class="ghost" type="button" hidden>Passwortschutz entfernen</button>
+          <span id="pw-msg" class="hint"></span>
+        </div>
+        <p class="hint">Gilt für alle Geräte; nach dem Setzen müssen sich alle anderen neu anmelden. Passwort vergessen?
+          Auf dem Server <code>.venv/bin/python -m app --remove-password</code> ausführen.</p>
+      </div>
+      <div class="panel">
+        <div class="row">
+          <strong class="grow">Im Speicher (von Ollama geladen)</strong>
+          <button id="set-loaded-refresh" class="ghost" type="button">Aktualisieren</button>
+        </div>
+        <div id="set-loaded" class="loaded-list"></div>
+        <span id="set-loaded-msg" class="error"></span>
+      </div>
+      <div class="panel">
         <strong>Installierte Modelle</strong>
         <div id="set-models" class="hint"></div>
       </div>
     </section>
   </main>
 
+  <script src="vendor/marked.umd.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="core.js"></script>
+  <script src="theme.js"></script>
+  <script src="auth.js"></script>
   <script src="chart.js"></script>
+  <script src="markdown.js"></script>
+  <script src="chat.js"></script>
+  <script src="chat-settings.js"></script>
+  <script src="models.js"></script>
+  <script src="attachments.js"></script>
+  <script src="context.js"></script>
+  <script src="chat-tools.js"></script>
+  <script src="rag.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
