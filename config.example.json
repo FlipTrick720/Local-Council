@@ -12,7 +12,9 @@
   "speedtest": {
     "models": [],
     "parallel": true,
-    "prompt": "Erkläre in drei Sätzen, wie ein Transformer-Sprachmodell funktioniert."
+    "prompt": "Erkläre in drei Sätzen, wie ein Transformer-Sprachmodell funktioniert.",
+    "bench_runs": 10,
+    "bench_warmup": true
   },
   "council": {
     "members": [],

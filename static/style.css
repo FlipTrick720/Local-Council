@@ -69,6 +69,8 @@ input[type=checkbox] { display: inline; width: auto; margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .row > label { flex: 1 1 180px; }
 .row > label.compact { flex: 0 0 200px; margin-bottom: 0; }
+.row > label.check { flex: 0 1 auto; margin-bottom: 8px; }
+.bench { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 .field > span { font-weight: 600; font-size: 13px; }
 .model-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
 .model-list label { margin: 0; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; font-weight: normal; font-size: 13px; cursor: pointer; }

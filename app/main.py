@@ -19,6 +19,7 @@ class SpeedtestRequest(BaseModel):
     prompt: str = Field(min_length=1)
     models: list[str] | None = None
     parallel: bool | None = None
+    record: bool = True  # False for benchmark warm-up runs
 
 
 class CouncilRequest(BaseModel):
@@ -84,7 +85,7 @@ def post_speedtest(req: SpeedtestRequest):
     if not models:
         raise HTTPException(400, "Keine Modelle für den Speed-Test ausgewählt.")
     parallel = req.parallel if req.parallel is not None else cfg["speedtest"]["parallel"]
-    return ndjson(speedtest.run(OllamaClient.from_config(cfg), models, req.prompt, parallel))
+    return ndjson(speedtest.run(OllamaClient.from_config(cfg), models, req.prompt, parallel, req.record))
 
 
 @app.get("/api/speedtest/history")

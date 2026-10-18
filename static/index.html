@@ -33,6 +33,15 @@
           <button id="speed-stop" disabled>Stopp</button>
           <button id="speed-save" class="ghost">Auswahl als Standard speichern</button>
         </div>
+        <div class="row bench">
+          <label class="compact">Benchmark: Anzahl Läufe
+            <input type="number" id="bench-runs" min="1" max="100">
+          </label>
+          <label class="check"><input type="checkbox" id="bench-warmup"> Erster Lauf als Aufwärmlauf
+            <small>(lädt die Modelle, wird nicht gespeichert)</small></label>
+          <button id="bench-run">Benchmark starten</button>
+          <span id="bench-msg" class="hint"></span>
+        </div>
       </div>
       <div id="speed-table"></div>
       <div id="speed-cards" class="cards"></div>

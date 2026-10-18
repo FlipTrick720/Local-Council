@@ -114,6 +114,13 @@ Neue Modelle bekommen automatisch eine eigene Datei und Farbe. Wird ein Modell a
 seine Linie im Diagramm neu, und der Tooltip zeigt „neue Version“. Ein „Gleichzeitig“-Lauf mit nur einem Modell
 zählt als „nacheinander“.
 
+**Benchmark:** „Benchmark starten“ führt den Speed-Test mehrfach hintereinander aus (Anzahl einstellbar,
+Standard 10), mit den angehakten Modellen, dem Prompt und der Einstellung „Gleichzeitig senden“. Jeder Lauf wird
+gespeichert, und die Tabelle zeigt pro Modell Ø/Min/Max Tokens/s, Ø Zeit bis zum ersten Token, Ø Gesamtzeit und
+Fehler. Optional ist der erste Lauf ein Aufwärmlauf: Er lädt die Modelle in den Speicher und wird nicht gespeichert,
+damit die Ladezeit die Werte nicht verfälscht. „Stopp“ bricht den ganzen Benchmark ab, bereits fertige Läufe
+bleiben gespeichert.
+
 Wird der Verlauf zu voll, löscht der Button **„Verlauf kürzen“** alle älteren Messungen. Pro Modell bleiben die
 letzten 3 Läufe je Modus erhalten (3 × nacheinander, 3 × gleichzeitig). Zum kompletten Zurücksetzen einfach die
 CSV-Dateien löschen.

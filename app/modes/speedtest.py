@@ -7,7 +7,9 @@ from app.modes.runner import Job, run_jobs
 from app.ollama import OllamaClient, OllamaError
 
 
-async def run(client: OllamaClient, models: list[str], prompt: str, parallel: bool) -> AsyncIterator[dict]:
+async def run(
+    client: OllamaClient, models: list[str], prompt: str, parallel: bool, record: bool = True,
+) -> AsyncIterator[dict]:
     try:
         versions = {m["name"]: m["digest"] for m in await client.list_models()}
     except OllamaError:
@@ -19,7 +21,7 @@ async def run(client: OllamaClient, models: list[str], prompt: str, parallel: bo
     yield {"type": "start", "models": models, "parallel": parallel}
     jobs = [Job(m, [{"role": "user", "content": prompt}]) for m in models]
     async for event in run_jobs(client, jobs, parallel):
-        if event["type"] == "done" and event["stats"]:
+        if record and event["type"] == "done" and event["stats"]:
             history.append({
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "run_id": run_id,

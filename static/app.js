@@ -142,19 +142,21 @@ function makeCard(parent, title, subtitle = '') {
 }
 
 // Wires a run/stop button pair around an async task that receives an AbortSignal.
-function runner(runBtn, stopBtn, task) {
+// runBtns may be one button or several that share the stop button (all are disabled while running).
+function runner(runBtns, stopBtn, task) {
+  const buttons = [].concat(runBtns);
   let controller = null;
   stopBtn.addEventListener('click', () => controller?.abort());
   return async () => {
     controller = new AbortController();
-    runBtn.disabled = true;
+    buttons.forEach((b) => { b.disabled = true; });
     stopBtn.disabled = false;
     try {
       await task(controller.signal);
     } catch (e) {
       if (e.name !== 'AbortError') alertBox(e.message);
     } finally {
-      runBtn.disabled = false;
+      buttons.forEach((b) => { b.disabled = false; });
       stopBtn.disabled = true;
       controller = null;
     }
@@ -169,13 +171,14 @@ function alertBox(message) {
 
 // Saves a field to config.json shortly after typing stops, when the field loses focus, and on page
 // reload/close. `section.key` is the config entry; `parse` turns the text into the value to store
-// (or throws an Error whose message is shown instead of saving).
+// (or throws an Error whose message is shown instead of saving). Checkboxes store true/false.
 const pendingSaves = new Set();
 
 function autosave(input, section, key, { parse = (v) => v, msg } = {}) {
   if (!msg) {
     msg = el('span', 'hint');
-    input.closest('label').insertBefore(msg, input);
+    if (input.type === 'checkbox') input.closest('label').append(msg);
+    else input.closest('label').insertBefore(msg, input);
   }
   let timer = null;
   const save = (keepalive = false) => {
@@ -183,7 +186,7 @@ function autosave(input, section, key, { parse = (v) => v, msg } = {}) {
     pendingSaves.delete(save);
     let value;
     try {
-      value = parse(input.value);
+      value = input.type === 'checkbox' ? input.checked : parse(input.value);
     } catch (e) {
       msg.textContent = ` · ${e.message}`;
       return;
@@ -241,23 +244,18 @@ async function flash(button, task) {
 
 // ---------- Speed-Test ----------
 
-function renderSpeedTable(rows) {
+// Renders the results table above the cards. `rows` are arrays of cell texts; the first row is marked best.
+function renderTable(caption, headers, rows) {
   const wrap = $('speed-table');
   wrap.replaceChildren();
   if (!rows.length) return;
-  rows.sort((a, b) => (b.stats?.tps ?? -1) - (a.stats?.tps ?? -1));
+  if (caption) wrap.append(el('h2', null, caption));
   const table = el('table');
   const head = el('tr');
-  for (const h of ['Modell', 'Tokens/s', 'Erstes Token', 'Gesamtzeit', 'Tokens', 'Prompt tok/s', 'Ladezeit'])
-    head.append(el('th', null, h));
+  for (const h of headers) head.append(el('th', null, h));
   table.append(head);
-  rows.forEach((r, i) => {
-    const s = r.stats || {};
-    const tr = el('tr', i === 0 && s.tps != null ? 'best' : '');
-    const cells = r.error
-      ? [r.model, 'Fehler', '', '', '', '', '']
-      : [r.model, fmt(s.tps, '', 1), fmt(s.ttft, ' s'), fmt(s.wall_time, ' s'), s.tokens ?? '–',
-         fmt(s.prompt_tps, '', 1), fmt(s.load_time, ' s')];
+  rows.forEach((cells, i) => {
+    const tr = el('tr', i === 0 && cells[1] !== 'Fehler' ? 'best' : '');
     for (const c of cells) tr.append(el('td', null, c));
     table.append(tr);
   });
@@ -266,31 +264,108 @@ function renderSpeedTable(rows) {
   wrap.append(div);
 }
 
-const runSpeed = runner($('speed-run'), $('speed-stop'), async (signal) => {
+function renderSpeedTable(events) {
+  const sorted = [...events].sort((a, b) => (b.stats?.tps ?? -1) - (a.stats?.tps ?? -1));
+  renderTable(null, ['Modell', 'Tokens/s', 'Erstes Token', 'Gesamtzeit', 'Tokens', 'Prompt tok/s', 'Ladezeit'],
+    sorted.map((r) => {
+      const s = r.stats || {};
+      return r.error
+        ? [r.model, 'Fehler', '', '', '', '', '']
+        : [r.model, fmt(s.tps, '', 1), fmt(s.ttft, ' s'), fmt(s.wall_time, ' s'), s.tokens ?? '–',
+           fmt(s.prompt_tps, '', 1), fmt(s.load_time, ' s')];
+    }));
+}
+
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+// Aggregates all recorded benchmark runs per model.
+function renderBenchTable(events, models, done, total) {
+  const rows = models.map((model) => {
+    const stats = events.filter((e) => e.model === model && e.stats).map((e) => e.stats);
+    const tps = stats.map((s) => s.tps).filter((v) => v != null);
+    return {
+      model,
+      tps: mean(tps),
+      cells: [model, fmt(mean(tps), '', 1), fmt(tps.length ? Math.min(...tps) : null, '', 1),
+        fmt(tps.length ? Math.max(...tps) : null, '', 1), fmt(mean(stats.map((s) => s.ttft).filter((v) => v != null)), ' s'),
+        fmt(mean(stats.map((s) => s.wall_time)), ' s'), String(events.filter((e) => e.model === model && e.error).length)],
+    };
+  }).sort((a, b) => (b.tps ?? -1) - (a.tps ?? -1));
+  renderTable(`Benchmark: ${done} von ${total} Läufen`,
+    ['Modell', 'Ø Tokens/s', 'Min', 'Max', 'Ø Erstes Token', 'Ø Gesamtzeit', 'Fehler'], rows.map((r) => r.cells));
+}
+
+function speedRequest() {
   const models = checkedModels($('speed-models'));
   if (!models.length) throw new Error('Bitte mindestens ein Modell auswählen.');
+  return { prompt: $('speed-prompt').value, models, parallel: $('speed-parallel').checked };
+}
+
+// One speed-test run with live cards. Calls onResult for every finished (done/error) model.
+async function speedRun(body, signal, onResult) {
   const cardsEl = $('speed-cards');
   cardsEl.replaceChildren();
-  renderSpeedTable([]);
-  const cards = Object.fromEntries(models.map((m) => [m, makeCard(cardsEl, m)]));
-  const rows = [];
+  const cards = Object.fromEntries(body.models.map((m) => [m, makeCard(cardsEl, m)]));
   try {
-    await stream('/api/speedtest', {
-      prompt: $('speed-prompt').value,
-      models,
-      parallel: $('speed-parallel').checked,
-    }, (ev) => {
+    await stream('/api/speedtest', body, (ev) => {
       const card = cards[ev.model];
       if (ev.type === 'token') card.token(ev.kind, ev.text);
-      else if (ev.type === 'done') { card.done(ev.stats); rows.push(ev); renderSpeedTable(rows); }
-      else if (ev.type === 'error' && card) { card.error(ev.error); rows.push(ev); renderSpeedTable(rows); }
+      else if (ev.type === 'done') { card.done(ev.stats); onResult(ev); }
+      else if (ev.type === 'error' && card) { card.error(ev.error); onResult(ev); }
       else if (ev.type === 'error') throw new Error(ev.error);
     }, signal);
   } finally {
     Object.values(cards).forEach((c) => c.stopped());
+  }
+}
+
+const speedButtons = [$('speed-run'), $('bench-run')];
+
+const runSpeed = runner(speedButtons, $('speed-stop'), async (signal) => {
+  const body = speedRequest();
+  const events = [];
+  renderSpeedTable([]);
+  try {
+    await speedRun(body, signal, (ev) => { events.push(ev); renderSpeedTable(events); });
+  } finally {
     loadSpeedHistory();
   }
 });
+
+const runBench = runner(speedButtons, $('speed-stop'), async (signal) => {
+  const body = speedRequest();
+  const total = parseRuns($('bench-runs').value);
+  const warmup = $('bench-warmup').checked;
+  const msg = $('bench-msg');
+  const events = [];
+  let done = 0;
+  renderTable(null, [], []);
+  try {
+    for (let i = warmup ? 0 : 1; i <= total; i++) {
+      msg.textContent = i === 0 ? 'Aufwärmlauf …' : `Lauf ${i} von ${total} …`;
+      await speedRun({ ...body, record: i > 0 }, signal, (ev) => {
+        if (i > 0) events.push(ev);
+      });
+      if (i > 0) {
+        done = i;
+        renderBenchTable(events, body.models, done, total);
+        loadSpeedHistory();
+      }
+    }
+    msg.textContent = `Fertig: ${total} Läufe gespeichert.`;
+  } catch (e) {
+    msg.textContent = `Abgebrochen nach ${done} von ${total} Läufen.`;
+    throw e;
+  } finally {
+    loadSpeedHistory();
+  }
+});
+
+function parseRuns(text) {
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 1 || n > 100) throw new Error('Anzahl Läufe: 1 bis 100');
+  return n;
+}
 
 const METRICS = {
   tps: (v) => v.toFixed(1),
@@ -360,6 +435,7 @@ $('hist-prune').addEventListener('click', async () => {
   loadSpeedHistory();
 });
 $('speed-run').addEventListener('click', runSpeed);
+$('bench-run').addEventListener('click', runBench);
 $('speed-save').addEventListener('click', (e) => flash(e.target, () => {
   Object.assign(state.config.speedtest, {
     models: checkedModels($('speed-models')),
@@ -579,7 +655,12 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   $('set-timeout').value = ollama.timeout;
   $('set-options').value = Object.keys(ollama.options || {}).length ? JSON.stringify(ollama.options, null, 2) : '';
 
+  $('bench-runs').value = speedtest.bench_runs;
+  $('bench-warmup').checked = speedtest.bench_warmup;
+
   autosave($('speed-prompt'), 'speedtest', 'prompt');
+  autosave($('bench-runs'), 'speedtest', 'bench_runs', { parse: parseRuns });
+  autosave($('bench-warmup'), 'speedtest', 'bench_warmup');
   autosave($('council-question'), 'council', 'question');
   autosave($('chat-system'), 'chat', 'system', { msg: $('chat-system-msg') });
   autosave($('set-keepalive'), 'ollama', 'keep_alive', { parse: (v) => v.trim() || null });
