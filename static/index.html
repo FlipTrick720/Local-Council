@@ -25,7 +25,8 @@
   <div id="login" class="login" hidden>
     <form id="login-form" class="panel">
       <h2>Local Council</h2>
-      <label>Passwort <input type="password" id="login-password" autocomplete="current-password"></label>
+      <input type="text" name="username" value="local-council" autocomplete="username" hidden>
+      <label>Passwort <input type="password" id="login-password" name="password" autocomplete="current-password"></label>
       <div class="actions">
         <button class="primary" type="submit">Anmelden</button>
         <span id="login-msg" class="error"></span>
@@ -197,9 +198,9 @@
     <!-- Einstellungen -->
     <section id="tab-settings" class="tab" hidden>
       <div class="panel">
-        <label>Ollama-URL <input id="set-url" placeholder="http://127.0.0.1:11434"></label>
+        <label>Ollama-URL <input id="set-url" autocomplete="off" placeholder="http://127.0.0.1:11434"></label>
         <div class="row">
-          <label>keep_alive <input id="set-keepalive" placeholder="5m"></label>
+          <label>keep_alive <input id="set-keepalive" autocomplete="off" placeholder="5m"></label>
           <label>Timeout (s) <input type="number" id="set-timeout" min="10"></label>
         </div>
         <label>Modell-Optionen (JSON, gilt für alle Modi)
@@ -230,14 +231,14 @@
         </div>
         <div id="rag-list" class="rag-list"></div>
         <div class="row">
-          <label>Neue Wissensbasis <input id="rag-name" placeholder="Name, z. B. Handbücher"></label>
+          <label>Neue Wissensbasis <input id="rag-name" autocomplete="off" placeholder="Name, z. B. Handbücher"></label>
           <button id="rag-create" type="button">Anlegen</button>
         </div>
         <span id="rag-msg" class="hint"></span>
       </div>
       <div class="panel">
         <strong>Websuche (optional)</strong>
-        <label>SearXNG-URL <input id="web-url" placeholder="http://192.168.178.10:8888"></label>
+        <label>SearXNG-URL <input id="web-url" autocomplete="off" placeholder="http://192.168.178.10:8888"></label>
         <div class="actions">
           <button id="web-test" type="button">Verbindung testen</button>
           <span id="web-msg" class="hint"></span>
@@ -248,10 +249,13 @@
       <div class="panel">
         <strong>Passwort</strong>
         <p id="pw-state" class="hint"></p>
-        <div class="row">
-          <label>Neues Passwort <input type="password" id="pw-new" autocomplete="new-password"></label>
-          <label>Wiederholen <input type="password" id="pw-repeat" autocomplete="new-password"></label>
-        </div>
+        <form id="pw-form" class="row">
+          <!-- The app has no user names; this tells password managers which "account" the password belongs to,
+               so they do not take a nearby field (e.g. the SearXNG URL) for the user name. -->
+          <input type="text" name="username" value="local-council" autocomplete="username" hidden>
+          <label>Neues Passwort <input type="password" id="pw-new" name="new-password" autocomplete="new-password"></label>
+          <label>Wiederholen <input type="password" id="pw-repeat" name="repeat-password" autocomplete="new-password"></label>
+        </form>
         <div class="actions">
           <button id="pw-set" type="button">Passwort setzen</button>
           <button id="pw-remove" class="ghost" type="button" hidden>Passwortschutz entfernen</button>

@@ -432,7 +432,7 @@ def remove_document(cid: str, upload_id: str):
 async def test_web():
     w = config.load()["web"]
     try:
-        results = await websearch.search(w["searxng_url"], "Ollama", w.get("max_results", 5))
+        results = await websearch.search(w["searxng_url"], "Ollama", w.get("max_results", 10))
     except websearch.WebError as e:
         raise HTTPException(502, str(e))
     return {"count": len(results), "first": results[0]["title"] if results else None}

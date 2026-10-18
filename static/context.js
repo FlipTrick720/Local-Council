@@ -21,6 +21,7 @@ function kTokens(n) {
 function contextWindow(chat) {
   const set = chat.options?.num_ctx ?? state.config.ollama.options?.num_ctx;
   if (set) return { size: set, source: 'aus den Einstellungen' };
+  if (chat.web && state.config.web?.num_ctx) return { size: state.config.web.num_ctx, source: 'für die Websuche (web.num_ctx)' };
   const loaded = loadedModels?.find((m) => m.name === $('chat-model').value);
   if (loaded?.context_length) return { size: loaded.context_length, source: 'von Ollama für das geladene Modell gemeldet' };
   return { size: DEFAULT_CTX, source: 'Ollama-Standard, geschätzt' };

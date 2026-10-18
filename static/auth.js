@@ -57,6 +57,12 @@ $('logout').addEventListener('click', async () => {
   location.reload();
 });
 
+// Enter in one of the password fields sets the password instead of submitting (and reloading) the page.
+$('pw-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  $('pw-set').click();
+});
+
 $('pw-set').addEventListener('click', async () => {
   const msg = $('pw-msg');
   const password = $('pw-new').value;

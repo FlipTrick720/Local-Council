@@ -55,7 +55,8 @@
   },
   "web": {
     "searxng_url": "",
-    "max_results": 5
+    "max_results": 10,
+    "num_ctx": 16384
   },
   "auth": {
     "password_hash": "",

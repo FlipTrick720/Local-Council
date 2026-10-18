@@ -151,8 +151,9 @@ sudo systemctl daemon-reload
   können (z. B. qwen3, llama3.1, qwen2.5, mistral-nemo); bei anderen erscheint ein Hinweis. Die Aufrufe und ihre
   Ergebnisse stehen aufklappbar über der Antwort.
 - **Websuche:** Mit „Websuche“ wird gesucht (SearXNG, siehe unten). Mit Werkzeugen entscheidet das Modell selbst,
-  wann und wonach es sucht; ohne Werkzeuge wird einmal mit der Frage gesucht und die Treffer werden mitgeschickt.
-  Die Treffer stehen als Quellen unter der Antwort.
+  wann und wonach es sucht, und arbeitet in bis zu 5 Schritten pro Antwort (z. B. suchen, dann die offizielle Seite
+  lesen, ggf. neu suchen); danach muss es mit dem Gefundenen antworten. Ohne Werkzeuge wird einmal mit der Frage
+  gesucht und die Treffer werden mitgeschickt. Siehe „Websuche“ unten für Details.
 - **Formeln:** LaTeX in Antworten wird mit KaTeX gesetzt: `$…$` und `\(…\)` im Text, `$$…$$` und `\[…\]` als
   eigene Zeile. KaTeX liegt mit Schriften in `static/vendor/katex/`, funktioniert also offline. Code bleibt
   unverändert, und Beträge wie „$5 bis $10“ bleiben Text. Während eine Formel noch gestreamt wird, steht sie grau
@@ -198,6 +199,23 @@ search:
 Dann unter **Einstellungen → Websuche** die URL eintragen (z. B. `http://127.0.0.1:8888`) und „Verbindung testen“.
 Das Werkzeug „Webseite lesen“ ruft nur öffentliche Adressen ab, nie Geräte im Heimnetz.
 
+So wird die Suche genutzt:
+
+- Eine Suche liefert bis zu 10 Treffer (`web.max_results`) mit Titel, URL, Ausschnitt und Datum, wenn SearXNG eins
+  kennt. Die Reihenfolge ist die von SearXNG; zusätzlich sieht das Modell, welche datierten Treffer die neuesten sind.
+  Optional kann es den Zeitraum eingrenzen (`time_range`: Tag, Woche, Monat, Jahr).
+- Bei eingeschalteter Websuche bekommt das Modell das heutige Datum und die Anweisung: bei Fragen nach
+  „neueste/aktuelle“ Dingen auf das Datum der Quellen achten, bei Widersprüchen die neueste verlässliche Quelle
+  nehmen, Primärquellen (offizielle Seite, GitHub Releases) bevorzugen und diese mit „Webseite lesen“ prüfen,
+  statt sich auf Ausschnitte zu verlassen. Stabile Versionen und Vorabversionen soll es unterscheiden.
+- Mit Websuche läuft der Chat mit 16k Tokens Kontext (`web.num_ctx`), weil Suchergebnisse und gelesene Seiten nicht
+  in Ollamas Standard von 4096 passen; Ollama würde sonst den Anfang samt Anweisungen abschneiden. Das braucht etwas
+  mehr Grafikspeicher (qwen3:8b: ca. 7,5 GB statt 5,6 GB). Eine eigene Kontextlänge im Chat oder unter
+  Modell-Optionen hat Vorrang; `0` schaltet das ab.
+- Die Antwort endet mit „Quellen:“ und den verwendeten URLs. Alle gefundenen und gelesenen Seiten stehen außerdem
+  aufklappbar unter der Antwort (mit Datum, soweit bekannt).
+- Die Anweisungen sind englisch und stehen oben in `app/modes/chat.py` (`DATE_PROMPT`, `WEB_PROMPT`, `TOOL_PROMPT`).
+
 ## Darstellung: Hell/Dunkel und Handy
 
 - Der Knopf oben rechts schaltet das Farbschema um: **Auto** (wie das System) → **Hell** → **Dunkel**. Die Wahl
@@ -232,7 +250,7 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
     "auto_title": true, "title_model": ""                      // automatische Titel
   },
   "rag": { "embed_model": "bge-m3", "top_k": 5 },              // Wissensbasen
-  "web": { "searxng_url": "", "max_results": 5 },              // Websuche
+  "web": { "searxng_url": "", "max_results": 10, "num_ctx": 16384 }, // Websuche
   "auth": { "password_hash": "", "secret": "" }                // nur über Einstellungen/CLI ändern
 }
 ```
@@ -334,7 +352,10 @@ Tailscale) nutzen.
 - **Wissensbasen:** einfache Abschnitte fester Größe, keine Layout-Erkennung. Eine Wissensbasis bleibt bei dem
   Embedding-Modell, mit dem sie angelegt wurde; zum Wechseln neu anlegen.
 - **Werkzeuge:** nur mit Modellen, die Tool-Calling können, und kleine Modelle nutzen sie nicht immer (rechnen
-  dann z. B. selbst). Höchstens 6 Werkzeug-Runden pro Antwort.
+  dann z. B. selbst). Höchstens 5 Werkzeug-Aufrufe pro Antwort.
+- **Websuche-Qualität** hängt am Modell: Auch mit den Anweisungen liest ein 8B-Modell manchmal die falsche Seite
+  oder verlässt sich doch auf einen veralteten Ausschnitt. Die Quellenliste unter der Antwort zeigt, worauf es
+  sich stützt. Viele Webseiten liefern SearXNG kein Datum.
 - **Websuche** braucht eine eigene SearXNG-Instanz.
 - **„Webseite lesen“:** Zwischen Prüfung der Adresse und Abruf könnte ein präparierter DNS-Server theoretisch
   eine andere Adresse liefern (DNS-Rebinding); sehr unwahrscheinlich, aber nicht ausgeschlossen.

@@ -23,10 +23,18 @@ CALCULATOR = _function(
     {"expression": {"type": "string", "description": "Python-style math expression"}}, ["expression"])
 DATETIME = _function("current_datetime", "Returns the current local date, weekday and time.", {}, [])
 WEB_SEARCH = _function(
-    "web_search", "Searches the web. Use it for current events, facts you are unsure about, or anything recent.",
-    {"query": {"type": "string", "description": "search query"}}, ["query"])
+    "web_search",
+    "Searches the web and returns up to 10 results with title, URL, date (if known) and snippet. Use it for current "
+    "events, versions, prices, or anything that may have changed since your training. Snippets can be outdated: "
+    "check the dates, and read the best (preferably official) page with fetch_url before answering.",
+    {"query": {"type": "string", "description": "search query, e.g. 'Ollama releases' or 'ollama latest version github'"},
+     "time_range": {"type": "string", "enum": list(websearch.TIME_RANGES),
+                    "description": "optional: only results from the last day/week/month/year"}},
+    ["query"])
 FETCH_URL = _function(
-    "fetch_url", "Reads the text of a web page, e.g. one found with web_search.",
+    "fetch_url",
+    "Reads the text of a web page, e.g. the official site, the GitHub releases page or another result found with "
+    "web_search.",
     {"url": {"type": "string", "description": "http(s) URL"}}, ["url"])
 
 
@@ -77,20 +85,27 @@ def calculate(expression: str) -> str:
     return str(result)
 
 
-async def run(name: str, args: dict, cfg: dict) -> str:
-    """Executes one tool call and returns the result as text for the model."""
+async def run(name: str, args: dict, cfg: dict) -> tuple[str, list[dict]]:
+    """Executes one tool call. Returns the result as text for the model and the web pages it is based on
+    ({"title", "url", "date", "snippet"}, empty for non-web tools) for the source list under the answer."""
     web = cfg.get("web", {})
     try:
         if name == "calculator":
-            return calculate(str(args.get("expression", "")))
+            return calculate(str(args.get("expression", ""))), []
         if name == "current_datetime":
             now = datetime.now().astimezone()
-            return f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzname()})"
+            return f"{WEEKDAYS[now.weekday()]}, {now:%d.%m.%Y %H:%M} ({now.tzname()})", []
         if name == "web_search":
-            results = await websearch.search(web.get("searxng_url", ""), str(args.get("query", "")), web.get("max_results", 5))
-            return websearch.format_results(results)
+            results = await websearch.search(web.get("searxng_url", ""), str(args.get("query", "")),
+                                             web.get("max_results", 10), args.get("time_range"))
+            # The reminder sits right next to the results; small models follow it more reliably there.
+            hint = ("\n\nNext step: snippets are short and may be outdated. Read the most relevant official page "
+                    "(e.g. GitHub releases, official website) with fetch_url before answering.") if results else ""
+            return websearch.format_results(results) + hint, results
         if name == "fetch_url":
-            return await websearch.fetch_text(str(args.get("url", "")))
+            url = str(args.get("url", ""))
+            text = await websearch.fetch_text(url)
+            return text, [{"title": url, "url": url, "date": None, "snippet": text[:300]}]
     except websearch.WebError as e:
-        return f"Fehler: {e}"
-    return f"Fehler: unbekanntes Werkzeug {name} ({json.dumps(args)[:100]})"
+        return f"Fehler: {e}", []
+    return f"Fehler: unbekanntes Werkzeug {name} ({json.dumps(args)[:100]})", []

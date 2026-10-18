@@ -235,7 +235,8 @@ function renderSources(box, sources) {
     if (s.kind === 'web') {
       const a = el('a', null, s.name || s.url);
       Object.assign(a, { href: s.url, target: '_blank', rel: 'noopener noreferrer' });
-      row.append(a);
+      row.append(a, el('span', 'hint', ` · ${s.date ? new Date(s.date).toLocaleDateString('de-DE') : 'ohne Datum'}`));
+      if (s.name && s.name !== s.url) row.append(el('div', 'source-url', s.url));
     } else {
       row.append(`${s.name}${s.page ? `, S. ${s.page}` : ''}`, el('span', 'hint', ` · Ähnlichkeit ${s.score}`));
     }

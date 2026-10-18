@@ -6,12 +6,14 @@ Pages are only fetched from public addresses: the model must not be able to reac
 import asyncio
 import ipaddress
 import socket
+from datetime import date, datetime
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 TIMEOUT = httpx.Timeout(15, connect=5)
+TIME_RANGES = ("day", "week", "month", "year")
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 NAT64 = ipaddress.ip_network("64:ff9b::/96")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Local Council; +https://github.com/FlipTrick720/Local-Council)"}
@@ -21,28 +23,64 @@ class WebError(RuntimeError):
     pass
 
 
-async def search(base_url: str, query: str, max_results: int = 5) -> list[dict]:
+async def search(base_url: str, query: str, max_results: int = 10, time_range: str | None = None) -> list[dict]:
+    """Results in SearXNG's relevance order: {"title", "url", "snippet", "date"} with date "YYYY-MM-DD" when
+    SearXNG knows it. `time_range` (day/week/month/year) limits results to recent pages."""
     if not base_url:
         raise WebError("Websuche ist nicht eingerichtet (Einstellungen → Websuche: SearXNG-URL).")
+    params = {"q": query, "format": "json"}
+    if time_range in TIME_RANGES:
+        params["time_range"] = time_range
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS) as client:
-            r = await client.get(f"{base_url.rstrip('/')}/search", params={"q": query, "format": "json"})
+            r = await client.get(f"{base_url.rstrip('/')}/search", params=params)
     except httpx.HTTPError as e:
         raise WebError(f"SearXNG nicht erreichbar unter {base_url}: {e}") from e
     if r.status_code == 403:
         raise WebError("SearXNG lehnt das JSON-Format ab: in settings.yml unter search → formats „json“ ergänzen.")
     if r.status_code != 200:
         raise WebError(f"SearXNG antwortet mit HTTP {r.status_code}.")
-    return [
-        {"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("content", "")}
-        for x in r.json().get("results", [])[:max_results]
-    ]
+    results, seen = [], set()
+    for x in r.json().get("results", []):
+        url = x.get("url") or ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        results.append({"title": x.get("title", ""), "url": url, "snippet": (x.get("content") or "")[:400],
+                        "date": _date(x.get("publishedDate"))})
+        if len(results) >= max_results:
+            break
+    return results
 
 
-def format_results(results: list[dict]) -> str:
+def _date(value) -> str | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _age(day: str) -> str:
+    days = (date.today() - date.fromisoformat(day)).days
+    return "today" if days <= 0 else "1 day ago" if days == 1 else f"{days} days ago"
+
+
+def format_results(results: list[dict], offset: int = 0) -> str:
+    """The results as text for the model: relevance order, each with its date, and a line naming the newest
+    dated results first, so that "latest version" questions do not stop at an old page."""
     if not results:
-        return "Keine Ergebnisse."
-    return "\n\n".join(f"[{n}] {r['title']}\n{r['url']}\n{r['snippet']}" for n, r in enumerate(results, 1))
+        return "No results."
+    dated = sorted((r for r in results if r["date"]), key=lambda r: r["date"], reverse=True)
+    lines = []
+    if dated:
+        newest = ", ".join(f"[{offset + results.index(r) + 1}] {r['date']}" for r in dated[:5])
+        lines.append(f"Newest dated results: {newest}. Results without a date may be old or new.\n")
+    for n, r in enumerate(results, offset + 1):
+        when = f"{r['date']} ({_age(r['date'])})" if r["date"] else "unknown"
+        lines.append(f"[{n}] {r['title']}\nURL: {r['url']}\nDate: {when}\n{r['snippet']}\n")
+    return "\n".join(lines).rstrip()
 
 
 async def _check_public(url: str) -> None:
