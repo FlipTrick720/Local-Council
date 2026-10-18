@@ -1,7 +1,7 @@
 'use strict';
 
 // Colour theme toggle: Auto (follows the system) → Hell → Dunkel. Stored per device in the browser.
-// The inline script in index.html applies it before the first paint; this keeps it up to date.
+// theme-init.js applies it before the first paint; this keeps it up to date.
 
 const THEME_KEY = 'local-council.theme';
 const THEMES = { auto: ['◐', 'Auto'], light: ['☀', 'Hell'], dark: ['☾', 'Dunkel'] };

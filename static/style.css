@@ -282,6 +282,9 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
 .rag-doc .attach-x { margin-left: auto; }
 
 /* ---------- Markdown ---------- */
+.math-display { display: block; overflow-x: auto; overflow-y: hidden; }
+.math-display .katex-display { margin: .5em 0; }
+.math-pending { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); }
 .md { overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }

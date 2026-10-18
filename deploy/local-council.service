@@ -1,0 +1,26 @@
+# systemd service for Local Council: starts after boot (once the network and Ollama are up), restarts on failure,
+# runs as a normal user. Install: see README, section "Autostart (systemd)".
+# Paths and user are set for this machine (/home/fox/Local-Council, user fox); adjust them on another one.
+
+[Unit]
+Description=Local Council (LLM web app for Ollama)
+Wants=network-online.target ollama.service
+After=network-online.target ollama.service
+
+[Service]
+Type=simple
+User=fox
+Group=fox
+WorkingDirectory=/home/fox/Local-Council
+# run.sh installs changed requirements first, then starts the server (host/port from config.json)
+ExecStart=/home/fox/Local-Council/run.sh
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+# Basic hardening: the app only needs to write inside its own folder
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

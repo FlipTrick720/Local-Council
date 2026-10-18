@@ -81,6 +81,8 @@ def delete(cid: str) -> None:
 
 
 def remove_document(cid: str, upload_id: str) -> dict:
+    if not uploads.ID_RE.match(upload_id):
+        raise RagError("Dokument nicht gefunden.")
     with _lock:
         collection = get(cid)
         collection["docs"] = [d for d in collection["docs"] if d["id"] != upload_id]

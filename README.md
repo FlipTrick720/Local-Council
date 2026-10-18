@@ -13,6 +13,91 @@ Sie läuft auf einem Rechner im Heimnetz und ist von allen Geräten unter `http:
 
 Alle Ausgaben werden live gestreamt. Bei „Thinking“-Modellen (z. B. qwen3, deepseek-r1) erscheint der Gedankengang einklappbar über der Antwort.
 
+## Voraussetzungen
+
+- Linux, macOS oder Windows mit **Python ≥ 3.10**
+- Laufendes **Ollama** mit mindestens einem Modell, z. B.:
+  ```bash
+  ollama pull llama3.2:3b
+  ollama pull qwen3:4b
+  ollama pull gemma3:4b
+  ```
+- Debian/Ubuntu: Für virtuelle Umgebungen wird `python3-venv` gebraucht:
+  ```bash
+  sudo apt install python3-venv
+  ```
+
+## Setup & Start
+
+```bash
+git clone https://github.com/FlipTrick720/Local-Council.git
+cd Local-Council
+./run.sh
+```
+
+Beim ersten Start legt `run.sh` die virtuelle Umgebung `.venv` an und installiert die Abhängigkeiten
+(FastAPI, uvicorn, httpx, pypdf, numpy). Ändert sich `requirements.txt` (z. B. nach einem `git pull`), installiert
+`run.sh` die Abhängigkeiten beim nächsten Start automatisch nach. Danach startet der Server auf `0.0.0.0:8080`.
+
+- Auf dem Rechner selbst: <http://localhost:8080>
+- Im Heimnetz: `http://<IP-des-Rechners>:8080` (IP z. B. mit `hostname -I` herausfinden)
+
+Ob die neue Version läuft, zeigt die Seite selbst; Logs stehen im Terminal (bzw. im Journal, siehe Autostart).
+
+Anderer Port oder Host: `./run.sh --port 9000` oder `./run.sh --host 127.0.0.1` (nur lokal erreichbar).
+
+Manuell ohne Skript:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m app
+```
+
+Falls eine Firewall aktiv ist, muss der Port freigegeben werden, z. B. `sudo ufw allow 8080/tcp`.
+
+## Neustart und Update
+
+- **Im Terminal gestartet:** mit Strg+C beenden und `./run.sh` erneut starten.
+- **Als Dienst (siehe Autostart):** `sudo systemctl restart local-council`
+- **Update:** `git pull`, danach neu starten. `run.sh` installiert geänderte Abhängigkeiten selbst nach.
+- Die meisten Änderungen an `config.json` wirken sofort (die Datei wird bei jeder Anfrage gelesen);
+  nur `server.host` und `server.port` brauchen einen Neustart.
+
+## Autostart (systemd)
+
+Die Datei [`deploy/local-council.service`](deploy/local-council.service) startet die App nach dem Booten, sobald
+Netzwerk und Ollama laufen, startet sie nach einem Absturz neu (nach 5 s) und läuft als normaler Benutzer.
+Sie ist auf diesen Rechner eingestellt: Benutzer `fox`, Ordner `/home/fox/Local-Council`. Auf einem anderen
+Rechner `User=`, `Group=`, `WorkingDirectory=` und `ExecStart=` anpassen.
+
+Läuft die App gerade von Hand, zuerst beenden, sonst ist Port 8080 belegt (Strg+C im Terminal, oder
+`pkill -f '.venv/bin/python -m app'`). Dann installieren und starten:
+
+```bash
+sudo cp /home/fox/Local-Council/deploy/local-council.service /etc/systemd/system/local-council.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now local-council
+systemctl status local-council
+```
+
+Nützlich danach:
+
+```bash
+journalctl -u local-council -f            # Log live ansehen
+sudo systemctl restart local-council      # nach einem Update
+sudo systemctl stop local-council         # anhalten (startet beim nächsten Booten wieder)
+```
+
+Nach Änderungen an der Service-Datei: erneut kopieren, `sudo systemctl daemon-reload`, dann `restart`.
+Wieder entfernen:
+
+```bash
+sudo systemctl disable --now local-council
+sudo rm /etc/systemd/system/local-council.service
+sudo systemctl daemon-reload
+```
+
 ## Chat
 
 - **Gespeicherte Chats:** Jede Unterhaltung liegt als JSON-Datei in `data/chats/<id>.json` (nicht im Git) und ist
@@ -68,6 +153,11 @@ Alle Ausgaben werden live gestreamt. Bei „Thinking“-Modellen (z. B. qwen3, d
 - **Websuche:** Mit „Websuche“ wird gesucht (SearXNG, siehe unten). Mit Werkzeugen entscheidet das Modell selbst,
   wann und wonach es sucht; ohne Werkzeuge wird einmal mit der Frage gesucht und die Treffer werden mitgeschickt.
   Die Treffer stehen als Quellen unter der Antwort.
+- **Formeln:** LaTeX in Antworten wird mit KaTeX gesetzt: `$…$` und `\(…\)` im Text, `$$…$$` und `\[…\]` als
+  eigene Zeile. KaTeX liegt mit Schriften in `static/vendor/katex/`, funktioniert also offline. Code bleibt
+  unverändert, und Beträge wie „$5 bis $10“ bleiben Text. Während eine Formel noch gestreamt wird, steht sie grau
+  als Rohtext da und wird gesetzt, sobald sie vollständig ist. Fehlerhafte Formeln erscheinen rot, der Rest der
+  Antwort bleibt lesbar.
 - **Status:** Unter dem Chat steht, was gerade passiert (Modell wird geladen, denkt nach, schreibt, fertig mit
   Tokens/s) oder welcher Fehler aufgetreten ist (Modell nicht installiert, Ollama oder Server nicht erreichbar).
 
@@ -108,46 +198,12 @@ search:
 Dann unter **Einstellungen → Websuche** die URL eintragen (z. B. `http://127.0.0.1:8888`) und „Verbindung testen“.
 Das Werkzeug „Webseite lesen“ ruft nur öffentliche Adressen ab, nie Geräte im Heimnetz.
 
-## Voraussetzungen
+## Darstellung: Hell/Dunkel und Handy
 
-- Linux, macOS oder Windows mit **Python ≥ 3.10**
-- Laufendes **Ollama** mit mindestens einem Modell, z. B.:
-  ```bash
-  ollama pull llama3.2:3b
-  ollama pull qwen3:4b
-  ollama pull gemma3:4b
-  ```
-- Debian/Ubuntu: Für virtuelle Umgebungen wird `python3-venv` gebraucht:
-  ```bash
-  sudo apt install python3-venv
-  ```
-
-## Setup & Start
-
-```bash
-git clone https://github.com/FlipTrick720/Local-Council.git
-cd Local-Council
-./run.sh
-```
-
-Beim ersten Start legt `run.sh` die virtuelle Umgebung `.venv` an und installiert die Abhängigkeiten
-(FastAPI, uvicorn, httpx, pypdf, numpy). Ändert sich `requirements.txt` (z. B. nach einem `git pull`), installiert
-`run.sh` die Abhängigkeiten beim nächsten Start automatisch nach. Danach startet der Server auf `0.0.0.0:8080`.
-
-- Auf dem Rechner selbst: <http://localhost:8080>
-- Im Heimnetz: `http://<IP-des-Rechners>:8080` (IP z. B. mit `hostname -I` herausfinden)
-
-Anderer Port oder Host: `./run.sh --port 9000` oder `./run.sh --host 127.0.0.1` (nur lokal erreichbar).
-
-Manuell ohne Skript:
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m app
-```
-
-Falls eine Firewall aktiv ist, muss der Port freigegeben werden, z. B. `sudo ufw allow 8080/tcp`.
+- Der Knopf oben rechts schaltet das Farbschema um: **Auto** (wie das System) → **Hell** → **Dunkel**. Die Wahl
+  gilt pro Gerät/Browser.
+- Auf schmalen Bildschirmen (Handy) liegt die Chatliste hinter „☰ Chats“, die Tabs lassen sich wischen und
+  Eingabefelder zoomen auf iOS nicht ungewollt hinein.
 
 ## Konfiguration
 
@@ -157,7 +213,10 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
 
 ```jsonc
 {
-  "server":    { "host": "0.0.0.0", "port": 8080 },          // Neustart nötig
+  "server": {
+    "host": "0.0.0.0", "port": 8080,   // Neustart nötig
+    "allowed_hosts": []                // zusätzliche Hostnamen, siehe „Sicherheit“
+  },
   "ollama": {
     "url": "http://127.0.0.1:11434",   // Ollama darf auch auf einem anderen Rechner laufen
     "timeout": 600,                    // Sekunden ohne Daten, bevor eine Anfrage abbricht
@@ -229,6 +288,66 @@ Wird der Verlauf zu voll, löscht der Button **„Verlauf kürzen“** alle ält
 letzten 3 Läufe je Modus erhalten (3 × nacheinander, 3 × gleichzeitig). Zum kompletten Zurücksetzen einfach die
 CSV-Dateien löschen.
 
+## Sicherheit im Heimnetz und Passwort
+
+Ohne Passwort kann jeder im Netz, der den Port erreicht, die App benutzen, alle Chats lesen und die Konfiguration
+ändern. Optional lässt sich ein **Passwort** setzen:
+
+- unter **Einstellungen → Passwort**, oder auf dem Server mit `.venv/bin/python -m app --set-password`.
+- Danach fragt jedes Gerät einmal nach dem Passwort und bleibt 30 Tage angemeldet („Abmelden“ oben rechts).
+  Ein neues Passwort meldet alle anderen Geräte ab. Alle `/api/…`-Adressen verlangen dann die Anmeldung.
+- Nach 10 falschen Versuchen von einer Adresse werden Anmeldungen von dort 15 Minuten lang abgelehnt.
+- Gespeichert wird nur ein Hash (PBKDF2) in `config.json` unter `auth`; die API gibt ihn nie heraus.
+- Passwort vergessen: `.venv/bin/python -m app --remove-password`.
+
+Weitere Schutzmaßnahmen, die immer aktiv sind:
+
+- **Erlaubte Adressen (Host-Prüfung):** Die App antwortet nur, wenn sie per IP-Adresse, `localhost` oder über den
+  Namen dieses Rechners aufgerufen wird (auch mit `.local`, `.lan`, `.fritz.box` …). Das verhindert, dass eine
+  fremde Webseite über „DNS-Rebinding“ aus deinem Browser heraus auf die App zugreift. Wer einen anderen Namen
+  nutzt (z. B. über Tailscale oder einen Reverse-Proxy), trägt ihn in `config.json` ein:
+  `"server": { "allowed_hosts": ["meinserver.tailnet.ts.net", ".example.org"] }` (`".…"` = ganze Domain,
+  `"*"` = Prüfung aus).
+- **Content-Security-Policy:** Die Seite lädt nur Dateien von diesem Server. Bilder von fremden Adressen in
+  Antworten werden nicht geladen; so kann eine manipulierte Webseite oder ein Dokument das Modell nicht dazu
+  bringen, Chat-Inhalte über eine Bild-URL nach außen zu schicken. Antworten werden zusätzlich mit DOMPurify
+  bereinigt.
+- **Dateien:** Uploads, Chats und Wissensbasen werden nur über geprüfte IDs angesprochen, nie über Dateinamen aus
+  der Anfrage. Hochgeladene Textdateien werden als reiner Text ausgeliefert, nie als HTML.
+- **„Webseite lesen“:** ruft nur öffentliche http(s)-Adressen ab, prüft jede Weiterleitung neu und lädt höchstens
+  2 MB. Adressen im Heimnetz, `localhost`, Link-Local und ähnliche werden abgelehnt.
+
+Die Verbindung ist unverschlüsselt (HTTP). Das Passwort schützt im Heimnetz vor Mitbenutzung, ersetzt aber kein
+HTTPS. Den Port deshalb nicht ins Internet weiterleiten; für Zugriff von unterwegs besser ein VPN (z. B. WireGuard,
+Tailscale) nutzen.
+
+## Bekannte Einschränkungen
+
+- **Kein HTTPS, keine Benutzerkonten:** Ein gemeinsames Passwort für alle; wer angemeldet ist, sieht alle Chats.
+  Passwort und Cookie gehen im Heimnetz unverschlüsselt über die Leitung.
+- **Chats speichert der Browser:** Wird ein Tab mitten in einer Antwort geschlossen, ist die Frage gespeichert, die
+  Teilantwort nicht. Bearbeiten zwei Geräte gleichzeitig denselben Chat, gewinnt der zuletzt gespeicherte Stand.
+- **Kontext-Anzeige ist geschätzt** (≈ 3,5 Zeichen pro Token). Ohne eigene Einstellung nutzt Ollama nur 4096
+  Tokens, längere Chats und Dokumente werden dann vorne abgeschnitten.
+- **PDFs:** nur mit Textebene, keine Texterkennung (OCR) für eingescannte Seiten; Tabellen und Spalten kommen als
+  Fließtext an.
+- **Wissensbasen:** einfache Abschnitte fester Größe, keine Layout-Erkennung. Eine Wissensbasis bleibt bei dem
+  Embedding-Modell, mit dem sie angelegt wurde; zum Wechseln neu anlegen.
+- **Werkzeuge:** nur mit Modellen, die Tool-Calling können, und kleine Modelle nutzen sie nicht immer (rechnen
+  dann z. B. selbst). Höchstens 6 Werkzeug-Runden pro Antwort.
+- **Websuche** braucht eine eigene SearXNG-Instanz.
+- **„Webseite lesen“:** Zwischen Prüfung der Adresse und Abruf könnte ein präparierter DNS-Server theoretisch
+  eine andere Adresse liefern (DNS-Rebinding); sehr unwahrscheinlich, aber nicht ausgeschlossen.
+- **Formeln:** KaTeX kann nicht alles, was LaTeX kann (z. B. keine eigenen Pakete, kein TikZ). Die Thinking-Ausgabe
+  wird als reiner Text gezeigt.
+- **Speed-Test:** Gleichzeitige Läufe teilen sich GPU und CPU; Tokens/s sind dann nicht mit Einzelläufen vergleichbar.
+
+## Council-Prompts anpassen
+
+Die Prompts für Diskussion und Zusammenfassung stehen als Konstanten oben in `app/modes/council.py`
+(`SYSTEM_PROMPT`, `DISCUSSION_PROMPT`, `SYNTHESIS_PROMPT`). Sie sind auf Englisch, weil das bei kleinen
+Modellen meist zuverlässiger funktioniert. Die Modelle sollen aber in der Sprache der Frage antworten.
+
 ## Projektstruktur
 
 ```
@@ -256,10 +375,12 @@ Local-Council/
 │   ├── index.html
 │   ├── style.css
 │   ├── core.js          # gemeinsame Helfer: API, NDJSON-Stream, Autosave, Kopieren
+│   ├── theme-init.js    # Farbschema vor dem ersten Zeichnen setzen
 │   ├── theme.js         # Hell/Dunkel/Auto
 │   ├── auth.js          # Anmeldung, Passwort setzen
 │   ├── chart.js         # kleines SVG-Liniendiagramm (keine externe Bibliothek)
 │   ├── markdown.js      # Markdown → bereinigtes HTML mit Code-Hervorhebung
+│   ├── math.js          # Formeln ($…$, $$…$$, \(…\), \[…\]) mit KaTeX
 │   ├── chat.js          # Chat-Tab: Chatliste, Nachrichten, Streaming
 │   ├── chat-settings.js # System-Prompt, Vorlagen, Generierungs-Einstellungen pro Chat
 │   ├── models.js        # Modelle im Speicher: laden/entladen, Fähigkeiten
@@ -268,8 +389,10 @@ Local-Council/
 │   ├── chat-tools.js    # Suche, Umbenennen, Export, Auto-Titel, Chatliste auf dem Handy
 │   ├── rag.js           # Wissensbasen und Websuche (Einstellungen)
 │   ├── app.js           # Speed-Test, Council, Einstellungen, Start
-│   └── vendor/          # marked, DOMPurify, highlight.js (unverändert, mit Lizenz-Hinweis)
+│   └── vendor/          # marked, DOMPurify, highlight.js, KaTeX (unverändert, mit Lizenz-Hinweis)
 ├── data/                # Messdaten, Chats, Anhänge, Wissensbasen (rag/), nicht im Git
+├── deploy/
+│   └── local-council.service  # systemd-Dienst für den Autostart
 ├── config.example.json  # Standardkonfiguration (Vorlage für config.json)
 ├── requirements.txt
 └── run.sh
@@ -315,53 +438,3 @@ Felder mit `?` fallen auf die Werte aus `config.json` zurück. Beispiel:
 curl -N http://localhost:8080/api/speedtest -H 'Content-Type: application/json' \
   -d '{"prompt": "Hallo!", "models": ["llama3.2:3b", "qwen3:4b"], "parallel": false}'
 ```
-
-## Council-Prompts anpassen
-
-Die Prompts für Diskussion und Zusammenfassung stehen als Konstanten oben in `app/modes/council.py`
-(`SYSTEM_PROMPT`, `DISCUSSION_PROMPT`, `SYNTHESIS_PROMPT`). Sie sind auf Englisch, weil das bei kleinen
-Modellen meist zuverlässiger funktioniert. Die Modelle sollen aber in der Sprache der Frage antworten.
-
-## Als Dienst starten (optional, systemd)
-
-`/etc/systemd/system/local-council.service`:
-
-```ini
-[Unit]
-Description=Local Council
-After=network-online.target ollama.service
-
-[Service]
-User=<dein-benutzer>
-WorkingDirectory=/pfad/zu/Local-Council
-ExecStart=/pfad/zu/Local-Council/.venv/bin/python -m app
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now local-council
-```
-
-## Darstellung: Hell/Dunkel und Handy
-
-- Der Knopf oben rechts schaltet das Farbschema um: **Auto** (wie das System) → **Hell** → **Dunkel**. Die Wahl
-  gilt pro Gerät/Browser.
-- Auf schmalen Bildschirmen (Handy) liegt die Chatliste hinter „☰ Chats“, die Tabs lassen sich wischen und
-  Eingabefelder zoomen auf iOS nicht ungewollt hinein.
-
-## Sicherheit und Passwort
-
-Ohne Passwort kann jeder im Netz, der den Port erreicht, die App benutzen und die Konfiguration ändern. Optional
-lässt sich ein **Passwort** setzen:
-
-- unter **Einstellungen → Passwort**, oder auf dem Server mit `.venv/bin/python -m app --set-password`.
-- Danach fragt jedes Gerät einmal nach dem Passwort und bleibt 30 Tage angemeldet („Abmelden“ oben rechts).
-  Ein neues Passwort meldet alle anderen Geräte ab.
-- Gespeichert wird nur ein Hash (PBKDF2) in `config.json` unter `auth`; die API gibt ihn nie heraus.
-- Passwort vergessen: `.venv/bin/python -m app --remove-password`.
-
-Die Verbindung ist unverschlüsselt (HTTP). Das Passwort schützt im Heimnetz vor Mitbenutzung, ersetzt aber kein
-HTTPS. Den Port deshalb nicht ins Internet weiterleiten.

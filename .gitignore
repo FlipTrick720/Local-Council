@@ -1,16 +1,25 @@
-# Python
+# Python: virtual environment, bytecode, tool caches
 .venv/
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+htmlcov/
 
-# Lokale Konfiguration (wird aus config.example.json erzeugt)
+# Local configuration. config.json is created from config.example.json and contains the
+# password hash and session secret (auth.*) – it must never be committed.
 config.json
-config.tmp
+*.tmp
 .env
+.env.*
 
-# Messdaten des Speed-Tests (lokal, pro Rechner)
+# Everything the app stores at runtime: chats, uploaded files, knowledge bases (texts + vectors),
+# speed-test measurements. Private, per machine.
 data/
 
 # Logs
@@ -20,4 +29,6 @@ data/
 .vscode/
 .idea/
 *.swp
+*~
 .DS_Store
+Thumbs.db

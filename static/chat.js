@@ -192,7 +192,7 @@ function messageView(msg) {
     body.after(files);
   }
 
-  const update = () => {
+  const update = (streaming = false) => {
     renderToolCalls(toolBox, msg.tools);
     renderSources(sourceBox, msg.sources);
     thinking.hidden = !msg.thinking;
@@ -200,7 +200,7 @@ function messageView(msg) {
     thinkText.textContent = msg.thinking || '';
     if (thinking.open) thinkText.scrollTop = thinkText.scrollHeight;
     if (msg.role === 'user') body.textContent = msg.content;
-    else renderMarkdown(body, msg.content);
+    else renderMarkdown(body, msg.content, { streaming });
     body.hidden = !msg.content;
     error.hidden = !msg.error;
     error.textContent = msg.error || '';
@@ -332,7 +332,7 @@ async function generate(chat) {
     redraw ??= setTimeout(() => {
       redraw = null;
       const follow = nearBottom();
-      view.update();
+      view.update(true);
       if (follow) window.scrollTo(0, document.documentElement.scrollHeight);
     }, 80);
   };

@@ -12,6 +12,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 TIMEOUT = httpx.Timeout(15, connect=5)
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Local Council; +https://github.com/FlipTrick720/Local-Council)"}
 
 
@@ -52,7 +54,9 @@ async def _check_public(url: str) -> None:
     except socket.gaierror as e:
         raise WebError(f"Adresse nicht gefunden: {parsed.hostname}") from e
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if ip.version == 6 and ip in NAT64:  # NAT64 hides an IPv4 address that may be in the LAN
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
         if not ip.is_global:
             raise WebError("Adressen im lokalen Netz werden nicht abgerufen.")
 
@@ -88,24 +92,31 @@ def html_to_text(html: str) -> str:
 
 
 async def fetch_text(url: str, max_chars: int = 6000) -> str:
-    """The readable text of a public web page. Redirects are followed by hand, each target checked again."""
+    """The readable text of a public web page. Redirects are followed by hand, each target checked again;
+    at most MAX_PAGE_BYTES are downloaded."""
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS, follow_redirects=False) as client:
         for _ in range(4):
             await _check_public(url)
             try:
-                r = await client.get(url)
+                async with client.stream("GET", url) as r:
+                    if r.is_redirect and "location" in r.headers:
+                        url = urljoin(url, r.headers["location"])
+                        continue
+                    if r.status_code != 200:
+                        raise WebError(f"Die Seite antwortet mit HTTP {r.status_code}.")
+                    body = bytearray()
+                    async for part in r.aiter_bytes():
+                        body += part
+                        if len(body) >= MAX_PAGE_BYTES:
+                            break
+                    kind = r.headers.get("content-type", "")
+                    raw = bytes(body).decode(r.encoding or "utf-8", errors="replace")
             except httpx.HTTPError as e:
                 raise WebError(f"Seite nicht erreichbar: {e}") from e
-            if r.is_redirect and "location" in r.headers:
-                url = urljoin(url, r.headers["location"])
-                continue
             break
         else:
             raise WebError("Zu viele Weiterleitungen.")
-    if r.status_code != 200:
-        raise WebError(f"Die Seite antwortet mit HTTP {r.status_code}.")
-    kind = r.headers.get("content-type", "")
-    text = html_to_text(r.text) if "html" in kind else r.text if kind.startswith("text/") else ""
+    text = html_to_text(raw) if "html" in kind else raw if kind.startswith("text/") else ""
     if not text:
         raise WebError(f"Kein lesbarer Text ({kind or 'unbekannter Typ'}).")
     return text[:max_chars] + ("\n… (gekürzt)" if len(text) > max_chars else "")
