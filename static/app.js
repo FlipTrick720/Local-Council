@@ -58,10 +58,15 @@ function modelNames() {
   return state.models.map((m) => m.name);
 }
 
-// Checkbox list of installed models; configured-but-missing models are shown struck through.
+// Drops models that are no longer installed. If Ollama is unreachable (empty list), keeps everything.
+function installedOnly(names) {
+  return state.models.length ? names.filter((n) => modelNames().includes(n)) : names;
+}
+
+// Checkbox list of installed models. Selected models are only shown struck through while Ollama is unreachable.
 function renderModelChecks(container, selected) {
   container.replaceChildren();
-  const names = [...new Set([...modelNames(), ...selected])];
+  const names = [...new Set([...modelNames(), ...installedOnly(selected)])];
   if (!names.length) container.append(el('span', 'hint', 'Keine Modelle gefunden. Läuft Ollama?'));
   for (const name of names) {
     const label = el('label');
@@ -80,6 +85,7 @@ function checkedModels(container) {
 }
 
 function renderModelSelect(select, selected, emptyLabel) {
+  selected = installedOnly(selected ? [selected] : [])[0];
   select.replaceChildren();
   if (emptyLabel) select.append(new Option(emptyLabel, ''));
   const names = [...new Set([...modelNames(), ...(selected ? [selected] : [])])];
@@ -430,8 +436,7 @@ $('set-save').addEventListener('click', async () => {
     });
     await saveConfig();
     msg.textContent = 'Gespeichert.';
-    await loadModels();
-    renderAll();
+    await refreshModels();
   } catch (e) {
     msg.textContent = 'Fehler: ' + e.message;
   }
@@ -439,14 +444,42 @@ $('set-save').addEventListener('click', async () => {
 
 // ---------- Init ----------
 
-function renderAll() {
-  const { speedtest, council, chat } = state.config;
-  renderModelChecks($('speed-models'), speedtest.models);
-  renderModelChecks($('council-members'), council.members);
-  renderModelSelect($('council-synth'), council.synthesizer, '(erstes Ratsmitglied)');
-  renderModelSelect($('chat-model'), chat.model);
+function renderPickers(sel) {
+  renderModelChecks($('speed-models'), sel.speed);
+  renderModelChecks($('council-members'), sel.council);
+  renderModelSelect($('council-synth'), sel.synth, '(erstes Ratsmitglied)');
+  renderModelSelect($('chat-model'), sel.chat);
   renderSettings();
 }
+
+function configSelection() {
+  const { speedtest, council, chat } = state.config;
+  return { speed: speedtest.models, council: council.members, synth: council.synthesizer, chat: chat.model };
+}
+
+// What is currently ticked/selected on the page (possibly unsaved).
+function pageSelection() {
+  return {
+    speed: checkedModels($('speed-models')),
+    council: checkedModels($('council-members')),
+    synth: $('council-synth').value,
+    chat: $('chat-model').value,
+  };
+}
+
+// Re-reads the installed models from Ollama and keeps the current on-page selection.
+let lastRefresh = 0;
+async function refreshModels() {
+  lastRefresh = Date.now();
+  const sel = pageSelection();
+  await loadModels();
+  renderPickers(sel);
+}
+
+// Pick up `ollama pull` / `ollama rm` when the user comes back to the tab.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.config && Date.now() - lastRefresh > 2000) refreshModels();
+});
 
 async function loadModels() {
   const status = $('status');
@@ -475,6 +508,7 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   $('council-parallel').checked = council.parallel;
   $('chat-system').value = chat.system;
   await loadModels();
-  renderAll();
+  lastRefresh = Date.now();
+  renderPickers(configSelection());
   loadSpeedHistory();
 })();
