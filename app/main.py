@@ -9,8 +9,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import (auth, chats, config, export, gpu, history, judge, memory, rag, sandbox, storage, titles, tools, uploads,
-                 users, websearch)
+from app import (auth, benchmark, chats, config, export, gpu, history, judge, memory, rag, sandbox, storage, titles, tools,
+                 uploads, users, websearch)
 from app.config import ROOT
 from app.modes import chat, council, speedtest
 from app.ollama import OllamaClient, OllamaError
@@ -559,6 +559,85 @@ def add_code_folder(cid: str, req: FolderRequest, user: AdminUser):
             yield {"type": "error", "error": str(e)}
 
     return ndjson(gpu.queued(user, "Wissensbasis", events()))
+
+
+# ---------- Benchmark: Council vs. single model (admins) ----------
+
+class BenchmarkSetup(BaseModel):
+    baseline: str = Field(min_length=1)
+    members: list[CouncilMember] = Field(min_length=2, max_length=6)
+    synthesizer: str = Field(min_length=1)
+    rounds: int = Field(default=1, ge=0, le=5)
+    parallel: bool = False
+    judge: str = Field(min_length=1)
+
+
+class VoteRequest(BaseModel):
+    qid: str
+    label: Literal["A", "B", "tie"]
+
+
+def _bench_call(fn, *args):
+    try:
+        return fn(*args)
+    except benchmark.BenchmarkError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/benchmark/questions", dependencies=ADMIN)
+def get_bench_questions():
+    return benchmark.questions()
+
+
+@app.put("/api/benchmark/questions", dependencies=ADMIN)
+def put_bench_questions(items: list[dict]):
+    return _bench_call(benchmark.save_questions, items)
+
+
+@app.get("/api/benchmark/runs", dependencies=ADMIN)
+def list_bench_runs():
+    return benchmark.list_runs()
+
+
+@app.post("/api/benchmark/runs")
+async def create_bench_run(req: BenchmarkSetup, user: AdminUser):
+    _bench_call(benchmark.check_idle)
+    run = benchmark.create({**req.model_dump(), "members": [m.model_dump() for m in req.members]})
+    return _bench_start(run["id"], user)
+
+
+@app.get("/api/benchmark/runs/{run_id}", dependencies=ADMIN)
+def get_bench_run(run_id: str):
+    run = _bench_call(benchmark.get, run_id)
+    return {**run, "progress": benchmark.progress(run), "summary": benchmark.summary(run)}
+
+
+@app.post("/api/benchmark/runs/{run_id}/start")
+async def resume_bench_run(run_id: str, user: AdminUser):
+    return _bench_start(run_id, user)
+
+
+def _bench_start(run_id: str, user: str) -> dict:
+    cfg = users.config_for(user)
+    run = _bench_call(benchmark.start, run_id, user, OllamaClient.from_config(cfg), cfg)
+    return {**run, "progress": benchmark.progress(run), "summary": benchmark.summary(run)}
+
+
+@app.post("/api/benchmark/runs/{run_id}/stop", dependencies=ADMIN)
+def stop_bench_run(run_id: str):
+    benchmark.stop(run_id)
+    return {"ok": True}
+
+
+@app.delete("/api/benchmark/runs/{run_id}", dependencies=ADMIN)
+def delete_bench_run(run_id: str):
+    _bench_call(benchmark.delete, run_id)
+    return {"deleted": run_id}
+
+
+@app.post("/api/benchmark/runs/{run_id}/vote", dependencies=ADMIN)
+def vote_bench(run_id: str, req: VoteRequest):
+    return _bench_call(benchmark.vote, run_id, req.qid, req.label)
 
 
 # ---------- Memory ----------

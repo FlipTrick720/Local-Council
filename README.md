@@ -10,6 +10,7 @@ Sie läuft auf einem Rechner im Heimnetz und ist von allen Geräten unter `http:
 | **Speed-Test** (Admins) | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. Jeder Lauf wird pro Modell als CSV gespeichert, und zwei Verlaufsdiagramme (nacheinander / gleichzeitig) zeigen die Entwicklung. |
 | **Chat** | Chat mit gespeicherten Unterhaltungen, Markdown- und Code-Darstellung, Stopp/Neu generieren und einem eigenen Modell pro Chat. Optional mit Wissensbasis, Websuche, Werkzeugen, Erinnerungen und Code-Modus. |
 | **Council** (im Chat: „+ Neuer Council“) | Mehrere Modelle mit Rollen beantworten eine Frage, diskutieren die (anonymisierten) Antworten der anderen über N Runden und ein wählbares Modell schreibt die finale Antwort. Eine Council-Sitzung ist ein Gespräch mit Nachfragen, siehe [Council](#council). |
+| **Benchmark** (Admins) | Ein Fragenkatalog läuft durch ein Einzelmodell und einen Council; ein Richter-Modell vergleicht die Antworten. Zeigt, ob der Council besser antwortet und was es an Zeit kostet, siehe [Benchmark](#benchmark-council-gegen-einzelmodell). |
 
 Mehrere Personen können gleichzeitig arbeiten, jede mit eigenem Konto; eine Warteschlange verteilt die GPU
 (siehe [Benutzer](#benutzer-anmeldung-und-sicherheit) und [Warteschlange](#warteschlange-für-die-gpu)).
@@ -194,6 +195,38 @@ dann die früheren Fragen, ihre letzten Positionen und die finalen Antworten als
   `data/judge/<benutzer>.jsonl` (auch über `GET /api/judge`), um später auszuwerten, ob der Council ein einzelnes
   Modell schlägt. Ein kleines Modell als Richter ist allerdings selbst kein verlässlicher Maßstab.
 - **„Als Standard für neue Councils“** speichert Mitglieder, Rollen, Runden und Bewertungsmodell für dich.
+- **Darstellung:** Jede Runde ist einzeln einklappbar (live öffnet sich die neue, die vorige klappt zu). Jedes
+  Mitglied hat eine eigene Farbe (Etikett und Kartenrand, in allen Runden gleich); wer gerade schreibt, ist
+  hervorgehoben und steht in der Statuszeile („schreibt: Mitglied A (Kritiker)“). Gedankengang und
+  Werkzeug-Aufrufe sind zugeklappt, die finale Antwort ist farbig abgesetzt.
+
+## Benchmark: Council gegen Einzelmodell
+
+Tab **Benchmark** (nur Admins): Bringt der Council wirklich bessere Antworten als ein einzelnes Modell, und was
+kostet das an Zeit?
+
+- **Fragen:** `data/benchmarks/questions.json`, beim ersten Öffnen mit 20 Startfragen auf Deutsch und Englisch
+  (Logik, Wissen, Mathe, Code, Schreiben), wo möglich mit kurzer Referenzantwort. Im Tab unter „Fragen“
+  bearbeitbar. Jeder Lauf speichert eine Kopie der Fragen, spätere Änderungen betreffen nur neue Läufe.
+- **Lauf:** Einzelmodell, Council (Mitglieder, Rollen, Runden, Modell für die finale Antwort) und Richter wählen,
+  „Benchmark starten“. Jede Frage geht nacheinander an das Einzelmodell, den Council und den Richter, jeweils
+  über die GPU-Warteschlange (andere können dazwischen arbeiten). Der Lauf arbeitet im Hintergrund auf dem Server
+  weiter, auch wenn die Seite geschlossen wird; der Stand („Frage 7/20: Council“) aktualisiert sich von selbst.
+  **Stoppen** behält alles Fertige, **Fortsetzen** macht beim ersten fehlenden Schritt weiter (auch nach einem
+  Neustart des Servers). Es läuft immer nur ein Benchmark gleichzeitig.
+- **Richter:** Er sieht beide Antworten in zufälliger Reihenfolge als „A“ und „B“, ohne Modellnamen; gespeichert
+  wird, welche welche war. Er wählt einen Sieger (oder unentschieden), vergibt 1–10 Punkte und prüft bei Fragen
+  mit Referenz die Korrektheit. Ist der Richter selbst im Council oder das Einzelmodell, erscheint eine Warnung.
+- **Selbst bewerten:** Unter dem Ergebnis die Antworten derselben Frage anonym als A/B sehen und „A ist besser /
+  B ist besser / Gleich gut“ wählen. Die Reihenfolge der Fragen ist zufällig, aber fest, so dass auch eine kleine
+  Stichprobe aussagekräftig ist. Angezeigt wird, wie oft deine Stimme mit dem Richter übereinstimmt.
+- **Ergebnis:** Siege (Einzelmodell / Council / unentschieden) mit Balken, Ø Punkte pro Kategorie, Ø Zeit und Ø
+  erzeugte Tokens pro Frage für beide, Anteil richtiger Antworten laut Referenz und der **Zeitfaktor** des
+  Councils („braucht im Schnitt 7× so lange“). Alle Läufe bleiben in `data/benchmarks/runs/<id>.json` und stehen
+  in der Liste zum Vergleichen.
+- **Ehrlich gesagt:** Das Urteil eines kleinen Richter-Modells ist ein Anhaltspunkt, kein Beweis. Es schwankt,
+  bevorzugt mitunter längere Antworten und irrt bei Fakten. Deshalb die eigenen Stimmen: Stimmt der Richter selten
+  mit dir überein, sind seine Siegquoten wenig wert. 20 Fragen sind außerdem eine kleine Stichprobe.
 
 ## Erinnerungen
 
@@ -323,8 +356,18 @@ So wird die Suche genutzt:
 ## Darstellung: Hell/Dunkel und Handy
 
 - Der Knopf oben rechts schaltet das Farbschema um: **Auto** (wie das System) → **Hell** → **Dunkel**. Die Wahl
-  gilt pro Gerät/Browser.
-- Auf schmalen Bildschirmen (Handy) liegt die Chatliste hinter „☰ Chats“, die Tabs lassen sich wischen und
+  gilt pro Gerät/Browser. Text und hervorgehobene Zustände haben in beiden Schemata mindestens 4,5 : 1 Kontrast.
+- **Einheitliche Bedienelemente** (`static/style.css`, Abschnitt „Tokens“): Abstände nach einer Skala
+  (4/8/12/16/24 px), eine Höhe für Eingabefelder, Auswahllisten und Knöpfe, drei Knopfarten (Hauptaktion gefüllt,
+  normale Aktion umrandet, Symbol-Knöpfe mindestens 36 × 36 px). Sichtbare Zustände für Hover, Tastatur-Fokus
+  (Fokusring) und deaktiviert.
+- **Was offen ist, ist markiert:** Eintrag in der Chatliste, „+ Neuer Chat“ bzw. „+ Neuer Council“ (solange ein
+  neuer, noch leerer offen ist), Titel über dem Chat und der Tab oben passen immer zusammen. Gesetzt wird das an
+  einer Stelle (`renderActive()` in `static/chat.js`), sofort beim Öffnen, Anlegen, Umbenennen und Löschen.
+- **Eingabezeile:** „Senden“ und „Stopp“ teilen sich einen Platz, das Textfeld springt beim Umschalten nicht.
+  „⏭ Finale Antwort“ (Council) steht in der Statuszeile darüber.
+- Auf schmalen Bildschirmen (Handy) liegt die Chatliste hinter „☰ Chats“, die Kopfzeile ist zweizeilig, die Tabs
+  lassen sich wischen, Umbenennen/Löschen in der Liste sind immer sichtbar und groß genug zum Tippen, und
   Eingabefelder zoomen auf iOS nicht ungewollt hinein.
 
 ## Konfiguration
@@ -546,6 +589,7 @@ Local-Council/
 │   ├── gpu.py           # Warteschlange für GPU-Aufträge
 │   ├── memory.py        # Erinnerungen pro Benutzer, Vorschläge aus Antworten
 │   ├── judge.py         # Bewertung von Council-Antworten
+│   ├── benchmark.py     # Benchmark Council gegen Einzelmodell (Fragen, Läufe im Hintergrund, Richter, Stimmen)
 │   ├── sandbox.py       # Code-Modus: Python im Docker-Container
 │   ├── codechunks.py    # Quelltext für Wissensbasen (ZIP/Ordner, nach Funktionen aufgeteilt)
 │   ├── rag.py           # Wissensbasen: Abschnitte, Embeddings, Suche
@@ -577,6 +621,7 @@ Local-Council/
 │   ├── council.js       # Council-Sitzungen im Chat: Mitglieder/Rollen, Runden-Ansicht, Bewertung
 │   ├── memory.js        # Erinnerungen: Einstellungen, Vorschläge unter Antworten
 │   ├── code.js          # Code-Modus: Ausführen-Knopf, Ausgabe, Sandbox-Einstellungen, Code-Ordner
+│   ├── benchmark.js     # Benchmark-Tab: Lauf einrichten, Fragen bearbeiten, Ergebnis, selbst bewerten
 │   ├── app.js           # Speed-Test, Einstellungen, Start
 │   └── vendor/          # marked, DOMPurify, highlight.js, KaTeX (unverändert, mit Lizenz-Hinweis)
 ├── data/                # Konten, Messdaten, Chats, Anhänge, Wissensbasen, nicht im Git
@@ -615,6 +660,10 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | POST | `/api/code/run` | `{code}` → `{stdout, stderr, error, images, seconds, timed_out}` |
 | POST | `/api/rag/{id}/folder` | `{path}` Code-Ordner einlesen (Admin) → NDJSON-Fortschritt |
 | GET | `/api/queue`, `/api/storage` | Auslastung der Warteschlange; eigener Speicherverbrauch |
+| GET / PUT | `/api/benchmark/questions` | Fragenkatalog lesen / speichern (Admin) |
+| GET / POST | `/api/benchmark/runs` | Läufe auflisten / `{baseline, members, synthesizer, rounds, parallel, judge}` anlegen und starten (Admin) |
+| GET / DELETE | `/api/benchmark/runs/{id}` | Lauf mit Antworten, Fortschritt und Zusammenfassung / löschen (Admin) |
+| POST | `/api/benchmark/runs/{id}/start`, `…/stop`, `…/vote` | fortsetzen, stoppen, `{qid, label: A\|B\|tie}` selbst bewerten (Admin) |
 | POST | `/api/chat` | `{messages: [{role, content, attachments?}], model?, system?, options?, think?, knowledge?, tools?, web?, memory?, code?}` → NDJSON-Stream |
 | POST | `/api/uploads?name=…` | Datei als roher Body → Metadaten mit `id` (für `attachments`) |
 | GET | `/api/uploads/{id}` | die hochgeladene Datei |

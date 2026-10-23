@@ -21,6 +21,7 @@ async function ensureLogin() {
   $('whoami').hidden = authOpen;
   $('whoami').textContent = `${state.user.name}${state.user.admin ? ' (Admin)' : ''}`;
   $('logout').hidden = authOpen;
+  $('logout').title = `Abmelden (angemeldet als ${state.user.name})`;
   $('pw-user').value = state.user.name;
   document.querySelectorAll('[data-admin]').forEach((node) => { node.hidden = !state.user.admin; });
   renderPasswordState();

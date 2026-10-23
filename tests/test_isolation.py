@@ -201,6 +201,15 @@ ADMIN_ROUTES = [
     ("put", "/api/config", {"queue": {"parallel": 8}}),
     ("post", "/api/code/run", {"code": "print(1)"}),
     ("post", "/api/rag/kb-00000000/folder", {"path": "/etc"}),
+    ("get", "/api/benchmark/questions", None),
+    ("put", "/api/benchmark/questions", [{"question": "x"}]),
+    ("get", "/api/benchmark/runs", None),
+    ("post", "/api/benchmark/runs", {"baseline": "m", "members": [{"model": "m"}, {"model": "m"}], "synthesizer": "m", "judge": "m"}),
+    ("get", "/api/benchmark/runs/x", None),
+    ("post", "/api/benchmark/runs/x/start", None),
+    ("post", "/api/benchmark/runs/x/stop", None),
+    ("post", "/api/benchmark/runs/x/vote", {"qid": "q", "label": "A"}),
+    ("delete", "/api/benchmark/runs/x", None),
 ]
 
 

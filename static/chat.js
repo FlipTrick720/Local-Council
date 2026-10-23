@@ -80,12 +80,31 @@ function renderChatList() {
       items.unshift({ id: current.id, title: current.title || untitled(current), model: current.model, updated: '', kind: current.kind });
     }
   }
+  if (!items.length && !search) list.append(el('p', 'empty', 'Noch keine Chats.'));
   for (const c of items) list.append(chatListItem(c, search?.q));
+  renderActive();
+}
+
+// The one place that marks what is open: the entry in the chat list, the "+ Neuer Chat/Council" button while an
+// unsaved new one is open, and the panel title. Everything that changes chatState.current or the list ends here
+// (showChat → renderChatList → renderActive), so they cannot disagree.
+function renderActive() {
+  const current = chatState.current;
+  for (const item of $('chat-list').querySelectorAll('.chat-item')) {
+    const on = item.dataset.id === current?.id;
+    item.classList.toggle('active', on);
+    if (on) item.querySelector('.chat-open').setAttribute('aria-current', 'true');
+    else item.querySelector('.chat-open').removeAttribute('aria-current');
+  }
+  const fresh = !!current && !current.messages.length && !chatState.list.some((c) => c.id === current.id);
+  $('chat-new').classList.toggle('is-active', fresh && current.kind !== 'council');
+  $('council-new').classList.toggle('is-active', fresh && current.kind === 'council');
   if (current) renderChatHeader(current);
 }
 
 function chatListItem(c, q) {
-  const item = el('div', `chat-item${chatState.current?.id === c.id ? ' active' : ''}`);
+  const item = el('div', 'chat-item');
+  item.dataset.id = c.id;
   const open = el('button', 'chat-open');
   open.type = 'button';
   open.append(el('span', 'chat-title', `${c.kind === 'council' ? '🏛 ' : ''}${c.title}`),
@@ -93,15 +112,15 @@ function chatListItem(c, q) {
   for (const hit of c.hits || []) open.append(highlighted(hit.snippet, q));
   if (c.hit_count > 3) open.append(el('span', 'hint', `… und ${c.hit_count - 3} weitere Treffer`));
   open.addEventListener('click', () => openChat(c.id, c.hits?.[0]?.index));
-  const rename = el('button', 'chat-act ghost', '✎');
-  rename.type = 'button';
-  rename.title = 'Umbenennen';
-  rename.addEventListener('click', () => renameChat(c));
-  const del = el('button', 'chat-act ghost', '×');
-  del.type = 'button';
-  del.title = 'Chat löschen';
-  del.addEventListener('click', () => deleteChat(c));
-  item.append(open, rename, del);
+  const acts = el('span', 'chat-acts');
+  for (const [icon, label, action] of [['✎', 'Umbenennen', renameChat], ['×', 'Löschen', deleteChat]]) {
+    const b = el('button', 'icon-btn ghost', icon);
+    Object.assign(b, { type: 'button', title: `${label}: ${c.title}` });
+    b.setAttribute('aria-label', `${label}: ${c.title}`);
+    b.addEventListener('click', () => action(c));
+    acts.append(b);
+  }
+  item.append(open, acts);
   return item;
 }
 
@@ -200,8 +219,11 @@ function messageView(msg) {
   foot.append(stats, actions);
   card.append(head, toolBox, thinking, body, proposals, sourceBox, error, foot);
   const council = msg.council ? councilView(msg) : null;
+  const finalLabel = el('div', 'final-label', 'Finale Antwort des Councils');
   if (council) {
+    card.classList.add('council-msg');
     toolBox.before(council.node);
+    body.before(finalLabel);
     sourceBox.before(council.judge);
   }
   if (msg.attachments?.length) {
@@ -225,6 +247,7 @@ function messageView(msg) {
     error.hidden = !msg.error;
     error.textContent = msg.error || '';
     stats.textContent = msg.stats ? chatStatsLine(msg.stats) : msg.stopped ? 'abgebrochen' : '';
+    finalLabel.hidden = !msg.content;
     council?.update(streaming);
   };
   update();
@@ -310,9 +333,11 @@ function renderChatLog() {
   }
 }
 
+// Send and Stop share one slot in the composer: only the usable one is shown.
 function setChatBusy(busy) {
   $('chat-send').disabled = busy;
-  $('chat-stop').disabled = !busy;
+  $('chat-send').hidden = busy;
+  $('chat-stop').hidden = !busy;
   document.querySelectorAll('#tab-chat .needs-idle').forEach((b) => { b.disabled = busy; });
 }
 
@@ -507,6 +532,7 @@ async function regenerate() {
 // ---------- Wiring ----------
 
 $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
+if (matchMedia('(max-width: 760px)').matches) $('chat-text').placeholder = 'Nachricht …';  // the long hint does not fit
 $('chat-text').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
   if (e.key === 'Escape') stopChat();

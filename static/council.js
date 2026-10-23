@@ -45,7 +45,9 @@ function newCouncil() {
 function renderCouncilSetup(chat) {
   const cfg = chat.council;
   const box = $('cs-members');
-  box.replaceChildren(...cfg.members.map((m, i) => memberRow(chat, m, i)));
+  box.replaceChildren(...cfg.members.map((m, i) => memberRow(cfg.members, m, i, {
+    changed: () => councilChanged(chat), redraw: () => renderCouncilSetup(chat),
+  })));
   $('cs-add').disabled = cfg.members.length >= MAX_MEMBERS;
   renderModelSelect($('cs-synth'), cfg.synthesizer, '(erstes Mitglied)');
   renderModelSelect($('cs-judge'), cfg.judge, '(keine Bewertung)');
@@ -54,12 +56,14 @@ function renderCouncilSetup(chat) {
   $('cs-parallel').checked = cfg.parallel;
 }
 
-function memberRow(chat, m, i) {
+// One member: letter, model, role, remove; a custom role opens its name and instruction below. Also used by the
+// benchmark setup. `changed` is called after every edit, `redraw` after removing the member.
+function memberRow(members, m, i, { changed, redraw }) {
   const row = el('div', 'cs-member');
   const model = el('select');
   renderModelSelect(model, m.model);
   m.model = model.value;
-  model.addEventListener('change', () => { m.model = model.value; councilChanged(chat); });
+  model.addEventListener('change', () => { m.model = model.value; changed(); });
 
   const role = el('select');
   role.append(new Option('(keine Rolle)', ''));
@@ -82,17 +86,18 @@ function memberRow(chat, m, i) {
     name.value = m.role;
     system.value = m.system;
     custom.hidden = role.value !== '*';
-    councilChanged(chat);
+    changed();
   });
-  name.addEventListener('input', () => { m.role = name.value; councilChanged(chat); });
-  system.addEventListener('input', () => { m.system = system.value; councilChanged(chat); });
+  name.addEventListener('input', () => { m.role = name.value; changed(); });
+  system.addEventListener('input', () => { m.system = system.value; changed(); });
 
-  const del = el('button', 'ghost small', '×');
-  Object.assign(del, { type: 'button', title: 'Mitglied entfernen', disabled: chat.council.members.length <= 2 });
+  const del = el('button', 'icon-btn ghost', '×');
+  Object.assign(del, { type: 'button', title: 'Mitglied entfernen', disabled: members.length <= 2 });
+  del.setAttribute('aria-label', `Mitglied ${String.fromCharCode(65 + i)} entfernen`);
   del.addEventListener('click', () => {
-    chat.council.members.splice(i, 1);
-    renderCouncilSetup(chat);
-    councilChanged(chat);
+    members.splice(i, 1);
+    redraw();
+    changed();
   });
   row.append(el('strong', null, String.fromCharCode(65 + i)), model, role, del, custom);
   return row;
@@ -148,13 +153,25 @@ function answerStats(s) {
   return [s.tps != null && fmt(s.tps, ' tok/s', 1), fmt(s.wall_time, ' s', 1)].filter(Boolean).join(' · ');
 }
 
-// One member's answer in one round; redrawn only when something changed.
+// Each member keeps one colour in all rounds (the chart palette, by letter).
+function memberColor(label) {
+  const i = label.charCodeAt(0) - 65;
+  return `var(--series-${(Math.max(0, i) % 8) + 1})`;
+}
+
+function memberTag(member) {
+  const tag = el('span', 'member-tag', `Mitglied ${member.label}`);
+  tag.style.setProperty('--member', memberColor(member.label));
+  return tag;
+}
+
+// One member's answer in one round; redrawn only when something changed. Thinking and tool calls start folded.
 function memberCard(member) {
-  const card = el('div', 'card');
+  const card = el('div', 'card member-card');
+  card.style.setProperty('--member', memberColor(member.label));
   const head = el('div', 'card-head');
-  const badge = el('span', 'badge', 'läuft …');
-  head.append(el('strong', null, `Mitglied ${member.label}`),
-    el('span', 'sub', [member.role, member.model].filter(Boolean).join(' · ')), badge);
+  const badge = el('span', 'badge', 'wartet …');
+  head.append(memberTag(member), el('span', 'sub', [member.role, member.model].filter(Boolean).join(' · ')), badge);
   const tools = el('details', 'tools');
   const thinking = el('details', 'thinking');
   const thinkText = el('div', 'think-text');
@@ -166,16 +183,19 @@ function memberCard(member) {
   return {
     node: card,
     update(a, streaming) {
-      const sig = `${a.content.length}|${a.thinking.length}|${a.tools?.length}|${a.tools?.at(-1)?.result != null}|${a.error}|${!!a.stats}`;
+      const working = streaming && !!a.working;
+      const sig = `${a.content.length}|${a.thinking.length}|${a.tools?.length}|${a.tools?.at(-1)?.result != null}|${a.error}|${!!a.stats}|${working}`;
       if (sig === last) return;
       last = sig;
+      card.classList.toggle('working', working);
       renderToolCalls(tools, a.tools);
       thinking.hidden = !a.thinking;
       thinkText.textContent = a.thinking;
       renderMarkdown(body, a.content, { streaming: streaming && !a.stats });
       error.hidden = !a.error;
       error.textContent = a.error || '';
-      badge.textContent = a.error ? 'Fehler' : a.stats ? answerStats(a.stats) : streaming ? 'läuft …' : 'abgebrochen';
+      badge.textContent = a.error ? 'Fehler' : a.stats ? answerStats(a.stats) : working ? 'schreibt …'
+        : streaming ? 'wartet …' : 'abgebrochen';
       badge.classList.toggle('err', !!a.error);
     },
   };
@@ -200,9 +220,13 @@ function councilView(msg) {
     for (const st of c.stages) {
       const key = `${st.stage}-${st.round}`;
       if (!stageNodes.has(key)) {
-        const node = el('div', 'council-stage');
+        // Each round folds on its own. Live, the new round opens and the finished one before it folds away;
+        // a stored answer shows only its last round.
+        const node = el('details', 'council-stage');
         const grid = el('div', 'cards');
-        node.append(el('h4', null, stageTitle(st, c.rounds)), grid);
+        node.append(el('summary', null, `${stageTitle(st, c.rounds)} · ${plural(Object.keys(st.answers).length, 'Antwort', 'Antworten')}`), grid);
+        stages.querySelectorAll('.council-stage').forEach((d) => { d.open = false; });
+        node.open = true;
         stages.append(node);
         stageNodes.set(key, grid);
       }
@@ -289,8 +313,15 @@ async function generateCouncil(chat) {
   let phase = 'Wartet';
   let statusText = null;
   let thinkStart = null;
+  // Who is working right now: members with tokens or tool calls but no answer yet in the current round.
+  const working = () => {
+    const st = msg.council.stages.at(-1);
+    const names = Object.entries(st?.answers || {}).filter(([, a]) => a.working)
+      .map(([label]) => { const m = msg.council.members.find((x) => x.label === label); return `Mitglied ${label}${m?.role ? ` (${m.role})` : ''}`; });
+    return names.length ? ` · schreibt: ${names.join(', ')}` : '';
+  };
   const tick = () => {
-    if (visible()) setChatStatus(`${statusText || phase} … ${Math.round((Date.now() - started) / 1000)} s`, 'busy');
+    if (visible()) setChatStatus(`${statusText || phase}${statusText ? '' : working()} … ${Math.round((Date.now() - started) / 1000)} s`, 'busy');
   };
   tick();
   const timer = setInterval(tick, 1000);
@@ -334,10 +365,16 @@ async function generateCouncil(chat) {
         }
       } else if (ev.type === 'token' && ev.member !== 'judge') {
         const a = councilStage(msg, ev)?.answers[ev.member];
-        if (a) a[ev.kind === 'thinking' ? 'thinking' : 'content'] += ev.text;
+        if (a) {
+          a[ev.kind === 'thinking' ? 'thinking' : 'content'] += ev.text;
+          a.working = true;
+        }
       } else if (ev.type === 'tool_call') {
         const a = councilStage(msg, ev)?.answers[ev.member];
-        if (a) (a.tools ??= []).push({ name: ev.name, arguments: ev.arguments });
+        if (a) {
+          (a.tools ??= []).push({ name: ev.name, arguments: ev.arguments });
+          a.working = true;
+        }
         statusText = `Mitglied ${ev.member}: ${ev.name}`;
       } else if (ev.type === 'tool_result') {
         const call = councilStage(msg, ev)?.answers[ev.member]?.tools?.findLast((t) => t.name === ev.name && t.result == null);
@@ -356,7 +393,7 @@ async function generateCouncil(chat) {
       } else if (ev.type === 'done') {
         if (ev.member === 'final') Object.assign(msg, { stats: ev.stats, content: ev.content });
         const a = councilStage(msg, ev)?.answers[ev.member];
-        if (a) Object.assign(a, { content: ev.content, stats: ev.stats });
+        if (a) Object.assign(a, { content: ev.content, stats: ev.stats, working: false });
       } else if (ev.type === 'memory_proposals') {
         msg.memory_proposals = ev.items.map((text) => ({ text, state: 'open' }));
       } else if (ev.type === 'judge') {
@@ -364,7 +401,7 @@ async function generateCouncil(chat) {
           synthesizer: ev.synthesizer };
       } else if (ev.type === 'error') {
         const a = councilStage(msg, ev)?.answers[ev.member];
-        if (a) a.error = ev.error;
+        if (a) Object.assign(a, { error: ev.error, working: false });
         else if (ev.member === 'judge') c.warnings.push(ev.error);
         else msg.error = ev.error;
       }
@@ -383,6 +420,7 @@ async function generateCouncil(chat) {
     chatState.controller = null;
     setChatBusy(false);
     if (!msg.thinking) delete msg.thinking;
+    for (const st of msg.council.stages) for (const a of Object.values(st.answers)) delete a.working;
     if (!chat.title) chat.title = titleFrom(chat);
     if (visible()) {
       renderChatLog();

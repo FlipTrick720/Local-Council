@@ -14,6 +14,7 @@
     <nav>
       <button data-tab="speed" data-admin>Speed-Test</button>
       <button data-tab="chat">Chat</button>
+      <button data-tab="bench" data-admin>Benchmark</button>
       <button data-tab="settings">Einstellungen</button>
     </nav>
     <span id="status" class="status" title="Verbindung zu Ollama">…</span>
@@ -92,10 +93,10 @@
       <div class="chat-layout">
         <div id="chat-backdrop" class="drawer-backdrop" hidden></div>
         <aside id="chat-side" class="panel chat-side">
-          <button id="chat-new" class="primary" type="button">+ Neuer Chat</button>
-          <button id="council-new" type="button" title="Mehrere Modelle beraten gemeinsam und schreiben eine finale Antwort">+ Neuer Council</button>
+          <button id="chat-new" class="new-btn" type="button">+ Neuer Chat</button>
+          <button id="council-new" class="new-btn" type="button" title="Mehrere Modelle beraten gemeinsam und schreiben eine finale Antwort">+ Neuer Council</button>
           <input id="chat-search" type="search" placeholder="Chats durchsuchen …" autocomplete="off">
-          <div id="chat-list" class="chat-list"></div>
+          <div id="chat-list" class="chat-list"><p class="empty">Lädt …</p></div>
           <button id="chat-export-all" class="ghost small" type="button">Alle Chats exportieren (ZIP)</button>
         </aside>
         <div class="chat-main">
@@ -123,17 +124,14 @@
                 <div id="cs-members" class="cs-members"></div>
                 <button id="cs-add" class="ghost small" type="button">+ Mitglied</button>
               </div>
-              <div class="row">
+              <div class="form-grid">
                 <label>Finale Antwort durch <select id="cs-synth"></select></label>
-                <label class="compact">Diskussionsrunden <input type="number" id="cs-rounds" min="0" max="5"></label>
-                <label class="compact" title="Werkzeug-Aufrufe pro Mitglied und Runde">Werkzeug-Schritte <input type="number" id="cs-steps" min="1" max="5"></label>
-                <label class="check"><input type="checkbox" id="cs-parallel"> Mitglieder gleichzeitig</label>
-              </div>
-              <div class="row">
                 <label title="Ein Modell bewertet nach der finalen Antwort die ersten Antworten der Mitglieder (je ein Modell allein) und die finale Antwort.">Bewertung durch
                   <select id="cs-judge"></select></label>
-                <button id="cs-save" class="ghost" type="button">Als Standard für neue Councils</button>
-                <span id="cs-msg" class="hint"></span>
+                <label>Diskussionsrunden <input type="number" id="cs-rounds" min="0" max="5"></label>
+                <label title="Werkzeug-Aufrufe pro Mitglied und Runde">Werkzeug-Schritte <input type="number" id="cs-steps" min="1" max="5"></label>
+                <label class="check"><input type="checkbox" id="cs-parallel"> Mitglieder gleichzeitig</label>
+                <button id="cs-save" type="button">Als Standard für neue Councils</button>
               </div>
             </div>
             <details id="chat-settings">
@@ -182,20 +180,68 @@
             <div id="chat-attach-msg" class="ctx-warn" hidden></div>
             <div id="chat-ctx-warn" class="ctx-warn" hidden></div>
             <div class="dock-info">
-              <div id="chat-status" class="chat-status"></div>
+              <div id="chat-status" class="chat-status" role="status"></div>
+              <button type="button" id="council-skip" class="small" hidden title="Diskussion beenden und sofort die finale Antwort schreiben lassen">⏭ Finale Antwort</button>
               <div id="chat-ctx" class="ctx"></div>
             </div>
             <form id="chat-form" class="chat-input">
-              <button type="button" id="chat-file" class="ghost" title="Datei anhängen: Text, PDF oder Bild. Geht auch per Einfügen (Strg+V) oder Hineinziehen.">📎</button>
+              <button type="button" id="chat-file" class="icon-btn" aria-label="Datei anhängen" title="Datei anhängen: Text, PDF oder Bild. Geht auch per Einfügen (Strg+V) oder Hineinziehen.">📎</button>
               <input type="file" id="chat-file-input" multiple hidden>
               <textarea id="chat-text" rows="2" placeholder="Nachricht … (Enter senden, Shift+Enter Zeilenumbruch, Esc stoppt)"></textarea>
-              <button type="submit" id="chat-send" class="primary">Senden</button>
-              <button type="button" id="chat-stop" disabled>Stopp</button>
-              <button type="button" id="council-skip" hidden title="Diskussion beenden und sofort die finale Antwort schreiben lassen">⏭ Finale Antwort</button>
+              <!-- Send and Stop share one slot (only one shows), so the text field keeps its width. -->
+              <div class="send-slot">
+                <button type="submit" id="chat-send" class="primary">Senden</button>
+                <button type="button" id="chat-stop" hidden>Stopp</button>
+              </div>
             </form>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Benchmark (admins) -->
+    <section id="tab-bench" class="tab" hidden>
+      <div class="panel">
+        <strong>Council gegen Einzelmodell</strong>
+        <p class="hint">Jede Frage geht an ein Einzelmodell und an einen Council, nacheinander über die Warteschlange.
+          Ein Richter-Modell vergleicht beide Antworten (in zufälliger Reihenfolge als „A“ und „B“). Läuft im Hintergrund
+          weiter, auch wenn du die Seite schließt; Stoppen behält alles Fertige, Fortsetzen macht dort weiter.</p>
+        <div class="row">
+          <label>Einzelmodell <select id="bm-baseline"></select></label>
+          <label>Richter <select id="bm-judge"></select></label>
+        </div>
+        <div class="field"><span>Council</span>
+          <div id="bm-members" class="cs-members"></div>
+          <button id="bm-add" class="small" type="button">+ Mitglied</button>
+        </div>
+        <div class="row">
+          <label>Finale Antwort durch <select id="bm-synth"></select></label>
+          <label class="compact">Diskussionsrunden <input type="number" id="bm-rounds" min="0" max="5" value="1"></label>
+          <label class="check"><input type="checkbox" id="bm-parallel"> Mitglieder gleichzeitig</label>
+        </div>
+        <p id="bm-warn" class="warn-text"></p>
+        <div class="actions">
+          <button id="bm-start" class="primary" type="button">Benchmark starten</button>
+          <span id="bm-msg" class="error"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <strong>Läufe</strong>
+        <div id="br-list"></div>
+        <span id="br-msg" class="error"></span>
+      </div>
+      <div id="bm-result" class="panel" hidden></div>
+      <details class="panel">
+        <summary><strong>Fragen</strong> <span id="bq-count" class="hint"></span></summary>
+        <p class="hint">Gespeichert in <code>data/benchmarks/questions.json</code>. Mit Referenzantwort prüft der Richter
+          auch die Korrektheit. Änderungen gelten für neue Läufe; laufende und alte behalten ihre Fragen.</p>
+        <div id="bq-list" class="bq-list"></div>
+        <div class="actions">
+          <button id="bq-add" type="button">+ Frage</button>
+          <button id="bq-save" class="primary" type="button">Fragen speichern</button>
+          <span id="bq-msg" class="error"></span>
+        </div>
+      </details>
     </section>
 
     <!-- Einstellungen -->
@@ -352,6 +398,7 @@
   <script src="council.js"></script>
   <script src="memory.js"></script>
   <script src="code.js"></script>
+  <script src="benchmark.js"></script>
   <script src="rag.js"></script>
   <script src="app.js"></script>
 </body>
