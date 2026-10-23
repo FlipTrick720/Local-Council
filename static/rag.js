@@ -60,7 +60,15 @@ function renderKnowledgeBases() {
     const del = el('button', 'ghost small', 'Löschen');
     del.type = 'button';
     del.addEventListener('click', () => deleteKnowledgeBase(kb));
-    head.append(el('strong', null, kb.name), el('span', 'hint', `${plural(kb.docs.length, 'Dokument', 'Dokumente')} · ${kb.embed_model}`), add, del, input);
+    head.append(el('strong', null, kb.name), el('span', 'hint', `${plural(kb.docs.length, 'Dokument', 'Dokumente')} · ${kb.embed_model}`), add);
+    if (state.user.admin && state.config.code?.roots?.length) {
+      const folder = el('button', 'ghost small', 'Code-Ordner …');
+      folder.type = 'button';
+      folder.title = 'Quelltext aus einem Ordner auf dem Server einlesen (aufgeteilt nach Funktionen)';
+      folder.addEventListener('click', () => addCodeFolder(kb, box));
+      head.append(folder);
+    }
+    head.append(del, input);
     box.append(head);
     for (const doc of kb.docs) {
       const row = el('div', 'rag-doc');
@@ -85,7 +93,8 @@ async function addDocuments(kb, files, box) {
     try {
       const meta = await uploadFile(file);
       await stream(`/api/rag/${kb.id}/documents`, { upload_id: meta.id }, (ev) => {
-        if (ev.type === 'progress') row.textContent = `${file.name}: ${ev.done} von ${ev.total} Abschnitten eingelesen …`;
+        if (ev.type === 'queue' && ev.position) row.textContent = `${file.name}: ${queueText(ev.position)}`;
+        else if (ev.type === 'progress') row.textContent = `${file.name}: ${ev.done} von ${ev.total} Abschnitten eingelesen …`;
         else if (ev.type === 'error') throw new Error(ev.error);
       });
     } catch (e) {

@@ -16,7 +16,8 @@ function blankChat() {
   return {
     id: newChatId(), title: '', model: d.model || $('chat-model').value,
     system: d.system || '', options: { ...d.options }, think: d.think ?? null,
-    knowledge: d.knowledge || null, tools: !!d.tools, web: !!d.web, messages: [],
+    knowledge: d.knowledge || null, tools: !!d.tools, web: !!d.web, memory: d.memory !== false, code: !!d.code,
+    messages: [],
   };
 }
 
@@ -38,6 +39,10 @@ function setChatStatus(text, kind = '') {
 function shortDate(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function untitled(chat) {
+  return chat.kind === 'council' ? 'Neuer Council' : 'Neuer Chat';
 }
 
 function titleFrom(chat) {
@@ -72,7 +77,7 @@ function renderChatList() {
     items = [...chatState.list];
     // A new chat is only stored with its first message; until then it is listed here anyway.
     if (current && !items.some((c) => c.id === current.id)) {
-      items.unshift({ id: current.id, title: current.title || 'Neuer Chat', model: current.model, updated: '' });
+      items.unshift({ id: current.id, title: current.title || untitled(current), model: current.model, updated: '', kind: current.kind });
     }
   }
   for (const c of items) list.append(chatListItem(c, search?.q));
@@ -83,7 +88,8 @@ function chatListItem(c, q) {
   const item = el('div', `chat-item${chatState.current?.id === c.id ? ' active' : ''}`);
   const open = el('button', 'chat-open');
   open.type = 'button';
-  open.append(el('span', 'chat-title', c.title), el('span', 'hint', [c.model, shortDate(c.updated)].filter(Boolean).join(' · ')));
+  open.append(el('span', 'chat-title', `${c.kind === 'council' ? '🏛 ' : ''}${c.title}`),
+    el('span', 'hint', [c.model, shortDate(c.updated)].filter(Boolean).join(' · ')));
   for (const hit of c.hits || []) open.append(highlighted(hit.snippet, q));
   if (c.hit_count > 3) open.append(el('span', 'hint', `… und ${c.hit_count - 3} weitere Treffer`));
   open.addEventListener('click', () => openChat(c.id, c.hits?.[0]?.index));
@@ -124,8 +130,14 @@ function newChat() {
 function showChat(chat) {
   chatState.current = chat;
   rememberChat(chat.id);
+  const council = chat.kind === 'council';
+  $('chat-model-row').hidden = council;
+  $('chat-system-box').hidden = council;
+  $('council-setup').hidden = !council;
+  $('chat-save').hidden = council;
+  if (council) renderCouncilSetup(chat);
   renderModelSelect($('chat-model'), chat.model || state.config.chat.model);
-  if (chat.model && $('chat-model').value !== chat.model) {
+  if (chat.model && $('chat-model').value !== chat.model && !council) {
     setChatStatus(`Das Modell „${chat.model}“ dieses Chats ist nicht installiert. Bitte ein anderes wählen.`, 'err');
   } else {
     setChatStatus('');
@@ -172,20 +184,26 @@ async function persist(chat) {
 function messageView(msg) {
   const card = el('div', `card msg ${msg.role}`);
   const head = el('div', 'card-head');
-  head.append(el('strong', null, msg.role === 'user' ? 'Du' : msg.model || 'Assistent'));
+  head.append(el('strong', null, msg.role === 'user' ? 'Du' : msg.council ? `🏛 Council · ${msg.model}` : msg.model || 'Assistent'));
   const thinking = el('details', 'thinking');
   const thinkSummary = el('summary');
   const thinkText = el('div', 'think-text');
   thinking.append(thinkSummary, thinkText);
   const toolBox = el('details', 'tools');
   const sourceBox = el('details', 'sources');
+  const proposals = el('div', 'mem-proposals');
   const body = el('div', msg.role === 'user' ? 'plain' : 'md');
   const error = el('div', 'error');
   const foot = el('div', 'msg-foot');
   const stats = el('span', 'stats');
   const actions = el('span', 'msg-actions');
   foot.append(stats, actions);
-  card.append(head, toolBox, thinking, body, sourceBox, error, foot);
+  card.append(head, toolBox, thinking, body, proposals, sourceBox, error, foot);
+  const council = msg.council ? councilView(msg) : null;
+  if (council) {
+    toolBox.before(council.node);
+    sourceBox.before(council.judge);
+  }
   if (msg.attachments?.length) {
     const files = el('div', 'attach-list');
     for (const a of msg.attachments) files.append(attachmentChip(a));
@@ -200,14 +218,17 @@ function messageView(msg) {
     thinkText.textContent = msg.thinking || '';
     if (thinking.open) thinkText.scrollTop = thinkText.scrollHeight;
     if (msg.role === 'user') body.textContent = msg.content;
-    else renderMarkdown(body, msg.content, { streaming });
+    else renderMarkdown(body, streaming ? withoutMemoryMarkers(msg.content) : msg.content, { streaming });
+    if (msg.role === 'assistant' && !streaming) attachRuns(body, msg, chatState.current);
+    if (msg.role === 'assistant') renderProposals(proposals, msg, chatState.current);
     body.hidden = !msg.content;
     error.hidden = !msg.error;
     error.textContent = msg.error || '';
     stats.textContent = msg.stats ? chatStatsLine(msg.stats) : msg.stopped ? 'abgebrochen' : '';
+    council?.update(streaming);
   };
   update();
-  return { node: card, update, actions, thinking };
+  return { node: card, update, actions, thinking, council };
 }
 
 function renderToolCalls(box, calls) {
@@ -283,7 +304,10 @@ function renderChatLog() {
     log.append(view.node);
     return view;
   });
-  if (!messages.length) log.append(el('p', 'hint chat-empty', 'Neuer Chat: Modell wählen und lostippen.'));
+  if (!messages.length) {
+    log.append(el('p', 'hint chat-empty', chatState.current.kind === 'council'
+      ? 'Neuer Council: Mitglieder, Rollen und Runden wählen, dann die Frage stellen.' : 'Neuer Chat: Modell wählen und lostippen.'));
+  }
 }
 
 function setChatBusy(busy) {
@@ -300,11 +324,19 @@ function stopChat() {
   chatState.controller?.abort();
 }
 
-// What Ollama gets: the conversation without failed (empty) replies. Attachments go as upload ids.
+// What Ollama gets: the conversation without failed (empty) replies. Attachments go as upload ids; Council
+// answers also carry the members' final positions.
 function apiMessages(chat) {
   return chat.messages
     .filter((m) => m.content || m.attachments?.length)
-    .map(({ role, content, attachments }) => ({ role, content, attachments: (attachments || []).map((a) => a.id) }));
+    .map(({ role, content, attachments, members }) => ({
+      role, content, attachments: (attachments || []).map((a) => a.id),
+      members: (members || []).map(({ label, role: r, content: c }) => ({ label, role: r, content: c })),
+    }));
+}
+
+function respond(chat) {
+  return chat.kind === 'council' ? generateCouncil(chat) : generate(chat);
 }
 
 // Streams a new assistant reply for the end of `chat` and stores the chat afterwards, also on stop/error.
@@ -362,7 +394,8 @@ async function generate(chat) {
   try {
     const body = {
       model, messages, system: chat.system || '', options: chat.options || {}, think: chat.think ?? null,
-      knowledge: chat.knowledge || null, tools: !!chat.tools, web: !!chat.web,
+      knowledge: chat.knowledge || null, tools: !!chat.tools, web: !!chat.web, memory: memoryInUse(chat),
+      code: !!chat.code,
     };
     await stream('/api/chat', body, (ev) => {
       if (ev.type === 'token') {
@@ -388,6 +421,9 @@ async function generate(chat) {
       } else if (ev.type === 'status') {
         statusText = ev.text;
         tick();
+      } else if (ev.type === 'queue') {
+        statusText = queueText(ev.position) || null;
+        tick();
       } else if (ev.type === 'sources') {
         msg.sources = ev.sources;
         scheduleRedraw();
@@ -403,6 +439,9 @@ async function generate(chat) {
         scheduleRedraw();
       } else if (ev.type === 'done') {
         msg.stats = ev.stats;
+        msg.content = ev.content ?? msg.content;  // without <<remember: …>> lines
+      } else if (ev.type === 'memory_proposals') {
+        msg.memory_proposals = ev.items.map((text) => ({ text, state: 'open' }));
       } else if (ev.type === 'error') {
         msg.error = ev.error;
         if (/does not support thinking/.test(ev.error)) {
@@ -436,7 +475,7 @@ async function generate(chat) {
 }
 
 function checkModel() {
-  if ($('chat-model').value) return true;
+  if (chatState.current.kind === 'council' || $('chat-model').value) return true;
   setChatStatus('Bitte oben ein Modell auswählen. Läuft Ollama?', 'err');
   return false;
 }
@@ -455,14 +494,14 @@ async function sendChat() {
   const msg = { role: 'user', content: text };
   if (attachments.length) msg.attachments = attachments;
   chatState.current.messages.push(msg);
-  await generate(chatState.current);
+  await respond(chatState.current);
 }
 
 async function regenerate() {
   const chat = chatState.current;
   if (chatState.controller || !checkModel()) return;
   if (chat.messages.at(-1)?.role === 'assistant') chat.messages.pop();
-  if (chat.messages.length) await generate(chat);
+  if (chat.messages.length) await respond(chat);
 }
 
 // ---------- Wiring ----------

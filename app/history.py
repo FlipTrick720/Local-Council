@@ -6,9 +6,9 @@ an `ollama pull` update of the same model tag stay distinguishable.
 import csv
 import re
 
-from app.config import ROOT
+from app.config import DATA
 
-DATA_DIR = ROOT / "data" / "speedtest"
+DATA_DIR = DATA / "speedtest"
 FIELDS = ["timestamp", "run_id", "mode", "concurrency", "model", "version",
           "tps", "ttft", "wall_time", "tokens", "prompt_tokens", "prompt_tps", "load_time"]
 TEXT_FIELDS = {"timestamp", "run_id", "mode", "model", "version"}

@@ -34,23 +34,33 @@ async def stream_job(client: OllamaClient, job: Job) -> AsyncIterator[dict]:
 
 
 async def run_jobs(client: OllamaClient, jobs: list[Job], parallel: bool) -> AsyncIterator[dict]:
+    async for event in merge([stream_job(client, job) for job in jobs], parallel):
+        yield event
+
+
+async def merge(streams: list[AsyncIterator[dict]], parallel: bool) -> AsyncIterator[dict]:
+    """The events of several streams: one after another, or (parallel) interleaved as they come.
+    The streams are generators that only start working when first read."""
     if not parallel:
-        for job in jobs:
-            async for event in stream_job(client, job):
-                yield event
+        for s in streams:
+            try:
+                async for event in s:
+                    yield event
+            finally:
+                await s.aclose()  # also when the reader stops early (Stop, skip to the final answer)
         return
 
     queue: asyncio.Queue = asyncio.Queue()
     finished = object()
 
-    async def pump(job: Job):
+    async def pump(s: AsyncIterator[dict]):
         try:
-            async for event in stream_job(client, job):
+            async for event in s:
                 await queue.put(event)
         finally:
             await queue.put(finished)
 
-    tasks = [asyncio.create_task(pump(job)) for job in jobs]
+    tasks = [asyncio.create_task(pump(s)) for s in streams]
     remaining = len(tasks)
     try:
         while remaining:

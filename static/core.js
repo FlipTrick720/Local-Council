@@ -51,6 +51,11 @@ async function saveConfig(...sections) {
   state.config = await api('/api/config', { method: 'PUT', body });
 }
 
+// Text for the GPU queue's {"type": "queue", "position"} events (see app/gpu.py); '' once the job runs.
+function queueText(position) {
+  return position ? `Du bist #${position} in der Warteschlange (andere nutzen gerade die GPU). Stopp bricht ab.` : '';
+}
+
 // ---------- UI helpers ----------
 
 function el(tag, className, text) {

@@ -4,6 +4,7 @@ Stored in data/users.json as {"users": {name: {"password_hash", "admin", "create
   data/chats/<name>/       chats (app.chats)
   data/rag/<name>/         knowledge bases (app.rag)
   data/settings/<name>.json  the user's own config sections (USER_SECTIONS), on top of config.json
+  data/memory/<name>.json    remembered facts (app.memory), data/judge/<name>.jsonl  Council scores (app.judge)
 Uploads (data/uploads/) are shared: their id is a hash of the content, so only who has the file knows it.
 
 Before accounts existed there was one optional password in config.json (auth.password_hash). On first use that
@@ -18,9 +19,8 @@ import threading
 import time
 
 from app import auth, config
-from app.config import ROOT
+from app.config import DATA
 
-DATA = ROOT / "data"
 USERS_PATH = DATA / "users.json"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 FIRST_ADMIN = "admin"
@@ -133,7 +133,7 @@ def update(name: str, password: str | None = None, admin: bool | None = None) ->
 
 
 def delete(name: str) -> None:
-    """Removes the account with its chats, knowledge bases and settings."""
+    """Removes the account with its chats, knowledge bases, settings, memory and judge scores."""
     with _lock:
         users = _all()
         if name not in users:
@@ -144,7 +144,8 @@ def delete(name: str) -> None:
         _save(users)
         for folder in (DATA / "chats" / name, DATA / "rag" / name):
             shutil.rmtree(folder, ignore_errors=True)
-        (DATA / "settings" / f"{name}.json").unlink(missing_ok=True)
+        for path in (DATA / "settings" / f"{name}.json", DATA / "memory" / f"{name}.json", DATA / "judge" / f"{name}.jsonl"):
+            path.unlink(missing_ok=True)
 
 
 def _admin_count(users: dict) -> int:

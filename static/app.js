@@ -1,6 +1,6 @@
 'use strict';
 
-// Speed-Test, Council, Einstellungen and start-up. Loaded last, after core.js and the chat modules.
+// Speed-Test, Einstellungen and start-up. Loaded last, after core.js and the chat modules.
 
 // ---------- Speed-Test ----------
 
@@ -69,13 +69,15 @@ async function speedRun(body, signal, onResult) {
   try {
     await stream('/api/speedtest', body, (ev) => {
       const card = cards[ev.model];
-      if (ev.type === 'token') card.token(ev.kind, ev.text);
+      if (ev.type === 'queue') $('speed-queue').textContent = queueText(ev.position);
+      else if (ev.type === 'token') card.token(ev.kind, ev.text);
       else if (ev.type === 'done') { card.done(ev.stats); onResult(ev); }
       else if (ev.type === 'error' && card) { card.error(ev.error); onResult(ev); }
       else if (ev.type === 'error') throw new Error(ev.error);
     }, signal);
   } finally {
     Object.values(cards).forEach((c) => c.stopped());
+    $('speed-queue').textContent = '';
   }
 }
 
@@ -205,64 +207,6 @@ $('speed-save').addEventListener('click', (e) => flash(e.target, () => {
   return saveConfig('speedtest');
 }));
 
-// ---------- Council ----------
-
-function phaseTitle(ev, rounds) {
-  if (ev.stage === 'initial') return 'Erste Antworten';
-  if (ev.stage === 'discussion') return `Diskussionsrunde ${ev.round} von ${rounds}`;
-  return 'Finale Antwort des Rats';
-}
-
-const runCouncil = runner($('council-run'), $('council-stop'), async (signal) => {
-  const members = checkedModels($('council-members'));
-  if (members.length < 2) throw new Error('Bitte mindestens zwei Ratsmitglieder auswählen.');
-  if (!$('council-question').value.trim()) throw new Error('Bitte eine Frage eingeben.');
-  const out = $('council-out');
-  out.replaceChildren();
-  const cards = {};
-  let labels = {};
-  let rounds = 0;
-  try {
-    await stream('/api/council', {
-      question: $('council-question').value,
-      members,
-      synthesizer: $('council-synth').value || null,
-      rounds: Number($('council-rounds').value),
-      parallel: $('council-parallel').checked,
-    }, (ev) => {
-      const key = `${ev.stage}-${ev.round}-${ev.model}`;
-      if (ev.type === 'start') { labels = ev.labels; rounds = ev.rounds; }
-      else if (ev.type === 'phase') {
-        out.append(el('h2', null, phaseTitle(ev, rounds)));
-        const grid = el('div', 'cards');
-        out.append(grid);
-        for (const m of ev.models) {
-          const card = makeCard(grid, m, ev.stage === 'synthesis' ? 'fasst zusammen' : labels[m]);
-          if (ev.stage === 'synthesis') { card.card.classList.add('final'); grid.style.gridTemplateColumns = '1fr'; }
-          cards[`${ev.stage}-${ev.round}-${m}`] = card;
-        }
-      }
-      else if (ev.type === 'token') cards[key].token(ev.kind, ev.text);
-      else if (ev.type === 'done') cards[key].done(ev.stats);
-      else if (ev.type === 'error' && cards[key]) cards[key].error(ev.error);
-      else if (ev.type === 'error') out.append(el('p', 'error', ev.error));
-    }, signal);
-  } finally {
-    Object.values(cards).forEach((c) => c.stopped());
-  }
-});
-
-$('council-run').addEventListener('click', runCouncil);
-$('council-save').addEventListener('click', (e) => flash(e.target, () => {
-  Object.assign(state.config.council, {
-    members: checkedModels($('council-members')),
-    synthesizer: $('council-synth').value,
-    rounds: Number($('council-rounds').value),
-    parallel: $('council-parallel').checked,
-  });
-  return saveConfig('council');
-}));
-
 // ---------- Einstellungen ----------
 
 function renderSettings() {
@@ -299,28 +243,22 @@ $('set-save').addEventListener('click', async () => {
 
 function renderPickers(sel) {
   renderModelChecks($('speed-models'), sel.speed);
-  renderModelChecks($('council-members'), sel.council);
-  renderModelSelect($('council-synth'), sel.synth, '(erstes Ratsmitglied)');
   renderModelSelect($('chat-model'), sel.chat);
   renderModelSelect($('set-titlemodel'), sel.titleModel, '(Modell des Chats)');
   if (state.config.rag) renderEmbedModels();
+  if (chatState.current?.kind === 'council') renderCouncilSetup(chatState.current);
   renderSettings();
 }
 
 function configSelection() {
-  const { speedtest, council, chat } = state.config;
-  return {
-    speed: speedtest.models, council: council.members, synth: council.synthesizer, chat: chat.model,
-    titleModel: chat.title_model,
-  };
+  const { speedtest, chat } = state.config;
+  return { speed: speedtest.models, chat: chat.model, titleModel: chat.title_model };
 }
 
 // What is currently ticked/selected on the page (possibly unsaved).
 function pageSelection() {
   return {
     speed: checkedModels($('speed-models')),
-    council: checkedModels($('council-members')),
-    synth: $('council-synth').value,
     chat: $('chat-model').value,
     titleModel: $('set-titlemodel').value,
   };
@@ -364,16 +302,14 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   await ensureLogin();
   showTab(state.user.admin ? 'speed' : 'chat');  // the Speed-Test is for admins only
   state.config = await api('/api/config');
-  const { speedtest, council, ollama } = state.config;
+  const { speedtest, ollama } = state.config;
   $('speed-prompt').value = speedtest.prompt;
   $('speed-parallel').checked = speedtest.parallel;
-  $('council-question').value = council.question;
-  $('council-rounds').value = council.rounds;
-  $('council-parallel').checked = council.parallel;
   $('set-url').value = ollama.url;
   $('set-keepalive').value = ollama.keep_alive ?? '';
   $('set-timeout').value = ollama.timeout;
   $('set-options').value = Object.keys(ollama.options || {}).length ? JSON.stringify(ollama.options, null, 2) : '';
+  $('set-parallel').value = state.config.queue.parallel;
 
   $('bench-runs').value = speedtest.bench_runs;
   $('bench-warmup').checked = speedtest.bench_warmup;
@@ -381,10 +317,14 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   autosave($('speed-prompt'), 'speedtest', 'prompt');
   autosave($('bench-runs'), 'speedtest', 'bench_runs', { parse: parseRuns });
   autosave($('bench-warmup'), 'speedtest', 'bench_warmup');
-  autosave($('council-question'), 'council', 'question');
   autosave($('set-keepalive'), 'ollama', 'keep_alive', { parse: (v) => v.trim() || null });
   autosave($('set-timeout'), 'ollama', 'timeout', { parse: parseTimeout });
   autosave($('set-options'), 'ollama', 'options', { parse: parseOptions });
+  autosave($('set-parallel'), 'queue', 'parallel', { parse: (v) => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 8) throw new Error('1 bis 8');
+    return n;
+  } });
   $('set-autotitle').checked = state.config.chat.auto_title !== false;
   autosave($('set-autotitle'), 'chat', 'auto_title');
   autosave($('set-titlemodel'), 'chat', 'title_model');
@@ -393,5 +333,8 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   renderPickers(configSelection());
   if (state.user.admin) loadSpeedHistory();
   initRag();
+  initAccount();
+  initMemory();
+  initCode();
   initChat();
 })();

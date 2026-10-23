@@ -78,7 +78,7 @@ $('chat-title').addEventListener('dblclick', () => renameChat(chatState.current)
 // ---------- Header with title and export ----------
 
 function renderChatHeader(chat) {
-  $('chat-title').textContent = chat.title || 'Neuer Chat';
+  $('chat-title').textContent = chat.title || untitled(chat);
   const stored = chatState.list.some((c) => c.id === chat.id);
   for (const format of ['md', 'json']) {
     const link = $(`chat-export-${format}`);

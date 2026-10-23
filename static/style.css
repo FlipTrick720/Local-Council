@@ -316,3 +316,37 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
 .hljs-deletion { color: var(--err); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* ---------- Memory ---------- */
+.mem-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.mem-proposals { margin-top: 6px; }
+.mem-proposal { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; padding: 4px 0; }
+
+/* ---------- Code mode ---------- */
+.run-result:empty { display: none; }
+.run-result { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin: -4px 0 10px; font-size: 13px; }
+.run-head { display: flex; align-items: center; gap: 6px; }
+.run-head button { margin-left: auto; }
+.run-out, .run-err { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; margin: 6px 0; }
+.run-err { color: var(--muted); }
+.run-err.error { color: var(--err); }
+.run-img { display: block; max-width: 100%; margin: 6px 0; background: #fff; border-radius: 4px; }
+.code-bar button + button { margin-left: 4px; }
+
+/* ---------- Council ---------- */
+#council-new { width: 100%; margin-top: 6px; }
+.cs-members { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.cs-member { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cs-member > strong { width: 1.5em; }
+.cs-member select { flex: 1 1 160px; margin: 0; }
+.cs-member .cs-custom { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-member .cs-custom input { flex: 0 1 180px; margin: 0; }
+.cs-member .cs-custom textarea { flex: 1 1 300px; margin: 0; }
+.council-box { margin-bottom: 8px; }
+.council-box > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.council-stage h4 { font-size: 13px; margin: 12px 0 6px; color: var(--muted); }
+.council-stage .cards { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); margin-bottom: 4px; }
+.council-stage .card .md { max-height: 360px; overflow-y: auto; }
+.council-warn { font-size: 13px; color: var(--warn); margin: 4px 0; }
+.judge-table { margin-top: 8px; }
+.judge-table td.best { font-weight: 700; }

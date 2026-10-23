@@ -7,9 +7,12 @@ Sie läuft auf einem Rechner im Heimnetz und ist von allen Geräten unter `http:
 
 | Modus | Was passiert |
 |---|---|
-| **Speed-Test** | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. Jeder Lauf wird pro Modell als CSV gespeichert, und zwei Verlaufsdiagramme (nacheinander / gleichzeitig) zeigen die Entwicklung. |
-| **Council** | Mehrere Modelle beantworten eine Frage. Danach sehen sie die (anonymisierten) Antworten der anderen, diskutieren über N Runden (Standard: 2) und überarbeiten ihre Antwort. Zum Schluss fasst ein wählbares Modell alles zu einer finalen Antwort zusammen. |
-| **Chat** | Chat mit gespeicherten Unterhaltungen, Markdown- und Code-Darstellung, Stopp/Neu generieren und einem eigenen Modell pro Chat. |
+| **Speed-Test** (Admins) | Ein Prompt geht an mehrere Modelle, gleichzeitig oder nacheinander. Eine Tabelle vergleicht Tokens/s, Zeit bis zum ersten Token, Gesamtzeit, Prompt-Verarbeitung und Ladezeit. Jeder Lauf wird pro Modell als CSV gespeichert, und zwei Verlaufsdiagramme (nacheinander / gleichzeitig) zeigen die Entwicklung. |
+| **Chat** | Chat mit gespeicherten Unterhaltungen, Markdown- und Code-Darstellung, Stopp/Neu generieren und einem eigenen Modell pro Chat. Optional mit Wissensbasis, Websuche, Werkzeugen, Erinnerungen und Code-Modus. |
+| **Council** (im Chat: „+ Neuer Council“) | Mehrere Modelle mit Rollen beantworten eine Frage, diskutieren die (anonymisierten) Antworten der anderen über N Runden und ein wählbares Modell schreibt die finale Antwort. Eine Council-Sitzung ist ein Gespräch mit Nachfragen, siehe [Council](#council). |
+
+Mehrere Personen können gleichzeitig arbeiten, jede mit eigenem Konto; eine Warteschlange verteilt die GPU
+(siehe [Benutzer](#benutzer-anmeldung-und-sicherheit) und [Warteschlange](#warteschlange-für-die-gpu)).
 
 Alle Ausgaben werden live gestreamt. Bei „Thinking“-Modellen (z. B. qwen3, deepseek-r1) erscheint der Gedankengang einklappbar über der Antwort.
 
@@ -162,6 +165,107 @@ sudo systemctl daemon-reload
 - **Status:** Unter dem Chat steht, was gerade passiert (Modell wird geladen, denkt nach, schreibt, fertig mit
   Tokens/s) oder welcher Fehler aufgetreten ist (Modell nicht installiert, Ollama oder Server nicht erreichbar).
 
+## Council
+
+Ein Council ist ein Chat-Typ: In der Chatliste **„+ Neuer Council“**. Er steht wie ein Chat in der Liste (🏛),
+lässt sich umbenennen, durchsuchen und exportieren, und man kann **Nachfragen** stellen: Die Mitglieder bekommen
+dann die früheren Fragen, ihre letzten Positionen und die finalen Antworten als Kontext (gekürzt).
+
+- **Mitglieder und Rollen:** 2 bis 6 Mitglieder, jedes mit eigenem Modell und optional einer Rolle (Vorlagen:
+  Kritiker, Skeptiker, Faktenprüfer, Praktiker, Zusammenfasser, oder „Eigene Rolle …“ mit eigener Anweisung).
+  Dasselbe Modell darf mehrfach mit verschiedenen Rollen dabei sein.
+- **Ablauf:** erste Antworten → N Diskussionsrunden (0–5) → finale Antwort durch das gewählte Modell. Die Runden
+  stehen einklappbar über der finalen Antwort, pro Mitglied mit Gedankengang, Werkzeug-Aufrufen, Tokens/s und Zeit.
+  **Stopp** bricht alles ab; **⏭ Finale Antwort** beendet die Diskussion sofort und lässt mit dem bisherigen Stand
+  die finale Antwort schreiben.
+- **Werkzeuge und Websuche** (unter „System-Prompt & Einstellungen“): Mitglieder, deren Modell Tool-Calling kann,
+  suchen selbst, höchstens „Werkzeug-Schritte“ Aufrufe pro Mitglied und Runde. Suchergebnisse und gelesene Seiten
+  sind geteilt: Dieselbe Suche läuft nur einmal, und die nächste Runde bekommt eine Liste dessen, was schon
+  recherchiert wurde.
+- **Dateien und Wissensbasis:** Anhänge und Wissensbasis-Ausschnitte bekommen alle Mitglieder gleich. Bilder sehen
+  nur Mitglieder mit Vision-Modell (sonst ein Hinweis). Pro Mitglied wird der Kontext gegen die Kontextlänge
+  seines Modells geprüft: Bei Bedarf wird sie bis `council.max_ctx` (Standard 16384) erhöht, und wenn es trotzdem
+  nicht passt, erscheint eine Warnung über der Antwort.
+- **Erinnerungen:** Ist „Erinnerungen“ an, bekommen alle Mitglieder deine gemerkten Fakten.
+- **Bewertung (optional):** Unter „Bewertung durch“ ein Modell wählen. Nach der finalen Antwort bewertet es die
+  *ersten* Antworten der Mitglieder (jedes Modell allein, noch ohne Diskussion) und die finale Antwort nach
+  Korrektheit, Vollständigkeit, Klarheit und Nützlichkeit (1–10). Die Antworten bekommt es in zufälliger
+  Reihenfolge und ohne Namen. Die Tabelle steht unter der Antwort, alle Bewertungen zusätzlich in
+  `data/judge/<benutzer>.jsonl` (auch über `GET /api/judge`), um später auszuwerten, ob der Council ein einzelnes
+  Modell schlägt. Ein kleines Modell als Richter ist allerdings selbst kein verlässlicher Maßstab.
+- **„Als Standard für neue Councils“** speichert Mitglieder, Rollen, Runden und Bewertungsmodell für dich.
+
+## Erinnerungen
+
+Unter **Einstellungen → Erinnerungen** stehen Fakten über dich, die Chat und Council kennen sollen (z. B. „Nutzt
+Arch Linux“, „mag kurze Antworten“). Sie liegen in `data/memory/<benutzer>.json` und gehören nur dir.
+
+- Bittest du das Modell, sich etwas zu merken, schlägt es den Fakt unter der Antwort vor („💡 Merken?“).
+  **Gespeichert wird nur, wenn du auf „Merken“ klickst**; automatisch wird nie etwas gespeichert. Von Hand
+  hinzufügen, bearbeiten und löschen geht auf der Einstellungsseite.
+- Schalter: global auf der Einstellungsseite, pro Chat unter „System-Prompt & Einstellungen → Erinnerungen“.
+- Die aktiven Fakten kommen in den System-Prompt, höchstens 2000 Zeichen (die neuesten zuerst). Die Kontext-Anzeige
+  zeigt, wie viele Tokens sie belegen (🧠).
+- Vorschläge macht das Modell mit einer Zeile `<<remember: …>>` am Ende der Antwort; der Server nimmt sie aus der
+  Antwort heraus. Eine Webseite oder ein Dokument könnte das Modell dazu bringen, einen Fakt vorzuschlagen, deshalb
+  braucht jeder Vorschlag deine Bestätigung.
+
+## Code-Modus
+
+Im Chat unter „System-Prompt & Einstellungen“ **„Code-Modus“** anhaken. Das Modell schreibt dann ausführbaren
+Python-Code; jeder Python-Block bekommt **„▶ Ausführen“**. Ausgabe, Fehlermeldungen und matplotlib-Diagramme
+erscheinen direkt unter dem Block und werden mit dem Chat gespeichert; **„In den Chat“** übernimmt die Ausgabe ins
+Eingabefeld, damit das Modell den Code korrigieren oder weiterführen kann.
+
+**Modell:** Für 12 GB VRAM passt `qwen2.5-coder:14b` (Q4, etwa 9 GB) oder schneller `qwen2.5-coder:7b`:
+`ollama pull qwen2.5-coder:14b`. Andere Modelle gehen auch, schreiben aber meist schlechteren Code.
+
+**Sandbox:** Jede Ausführung läuft in einem neuen Docker-Container (`app/sandbox.py`) mit:
+kein Netzwerk (`--network none`), schreibgeschütztes Dateisystem, 1 CPU und 512 MB RAM (einstellbar), höchstens
+64 Prozesse, keine Linux-Capabilities, Benutzer `nobody`, Zeitlimit 30 s (danach wird der Container beendet). Der
+Code kommt über die Standardeingabe hinein; gearbeitet wird in einem kleinen RAM-Dateisystem im Container, das mit
+dem Container verschwindet. Auf dem Rechner wird nichts geschrieben. Vorhanden: Python 3.12 mit numpy, pandas,
+scipy, sympy, matplotlib.
+
+**Wer darf:** standardmäßig nur Admins. Unter **Einstellungen → Code** kann ein Admin es für alle freigeben und
+Zeit- und Speicherlimit ändern; dort zeigt „Sandbox prüfen“, ob alles bereit ist.
+
+**Einrichtung (einmalig):** Die App muss Docker benutzen dürfen und das Image muss gebaut sein.
+
+1. **Empfohlen: rootless Docker** für den Benutzer, unter dem die App läuft. Dann laufen auch die Container ohne
+   Root-Rechte auf dem Rechner:
+   ```bash
+   sudo apt install uidmap rootlesskit
+   /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh install     # als fox, ohne sudo
+   sudo loginctl enable-linger fox                                          # Docker-Dienst läuft ohne Anmeldung
+   ```
+   Danach in `deploy/local-council.service` unter `[Service]` die Zeile
+   `Environment=DOCKER_HOST=unix:///run/user/1000/docker.sock` ergänzen (1000 = `id -u fox`), den Dienst neu
+   installieren (siehe Autostart) und neu starten.
+2. **Einfacher, aber riskanter:** `sudo usermod -aG docker fox`. Wer Zugriff auf den Docker-Socket hat, hat
+   praktisch Root-Rechte auf dem Rechner, also auch jede Lücke in der App.
+3. Image bauen (braucht einmal Internet), als derselbe Benutzer:
+   ```bash
+   docker build -t local-council-sandbox:1 deploy/sandbox
+   ```
+
+**Risiken, ehrlich:** Der Code kommt von einem Sprachmodell, und das Modell kann über Webseiten, Dokumente oder
+Nachrichten manipuliert werden. Die Sandbox begrenzt, was der Code tun kann, aber Container sind keine perfekte
+Grenze: Eine Lücke im Linux-Kernel oder in Docker könnte einen Ausbruch erlauben (mit rootless Docker landet man
+dann „nur“ als Benutzer fox, mit der docker-Gruppe als root). Darum: nur auf Code klicken, den du lesen kannst,
+Docker und das System aktuell halten, „für alle freigeben“ nur für Leute, denen du vertraust, und den Server nicht
+ins Internet stellen. Rechenintensiver Code bremst während der Laufzeit die anderen Benutzer (CPU), höchstens 2
+Ausführungen laufen gleichzeitig.
+
+### Fragen an eine Codebasis
+
+Wissensbasen nehmen auch Quelltext: eine **ZIP-Datei** mit dem Projekt über „Dokumente hinzufügen …“ (alle
+Benutzer), oder für Admins ein **Ordner auf dem Server** über „Code-Ordner …“. Ordner müssen unter Einstellungen →
+Code freigegeben sein (`code.roots`); symbolische Links werden nicht verfolgt. Der Code wird nach Funktionen und
+Klassen aufgeteilt (Python mit seinem Parser, andere Sprachen anhand typischer Zeilenanfänge), `node_modules`,
+`.git`, `venv` usw. werden übersprungen. Die Quellen unter der Antwort zeigen Datei und Zeilen, z. B.
+`gpu.py:45–83`. Denselben Ordner nochmal einlesen ersetzt die alte Fassung.
+
 ## Wissensbasen (RAG)
 
 Unter **Einstellungen → Wissensbasen** legt man Sammlungen von Dokumenten an (PDF, Text, Markdown, Quellcode …).
@@ -242,7 +346,9 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
     "options": {}                      // Ollama-Modelloptionen, z. B. {"temperature": 0.7, "num_ctx": 8192}
   },
   "speedtest": { "models": [], "parallel": true, "prompt": "…" },
-  "council":   { "members": [], "synthesizer": "", "rounds": 2, "parallel": true },
+  "queue": { "parallel": 1 },                                 // gleichzeitige GPU-Aufträge (Admins)
+  "council": { "members": [], "synthesizer": "", "rounds": 2, "parallel": false,
+               "tool_steps": 3, "judge": "", "max_ctx": 16384 },  // Vorgaben für neue Councils
   "chat": {
     "model": "", "system": "", "options": {}, "think": null,   // Vorgaben für neue Chats …
     "knowledge": null, "tools": false, "web": false,           // … inkl. Wissensbasis, Werkzeuge, Websuche
@@ -251,6 +357,10 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
   },
   "rag": { "embed_model": "bge-m3", "top_k": 5 },              // Wissensbasen
   "web": { "searxng_url": "", "max_results": 10, "num_ctx": 16384 }, // Websuche
+  "code": { "allow_users": false, "model": "qwen2.5-coder:14b", "docker": "docker",
+            "image": "local-council-sandbox:1", "timeout": 30, "cpus": 1, "memory_mb": 512,
+            "roots": [] },                                     // Code-Modus und Code-Ordner (Admins)
+  "limits": { "user_mb": 1024, "total_mb": 20480 },            // Speicher pro Benutzer / gesamt, 0 = aus
   "auth": { "secret": "" }                                     // Schlüssel für die Anmelde-Cookies
 }
 ```
@@ -265,10 +375,10 @@ in `config.json` sind nur die Vorgaben für neue Benutzer. Alles andere gilt fü
 - durch direktes Bearbeiten von `config.json` (wirkt sofort, die Datei wird bei jeder Anfrage neu gelesen).
 
 Der Tab **Einstellungen** bearbeitet Ollama-URL, `keep_alive`, Timeout und Modelloptionen und zeigt die installierten Modelle an.
-Ist `council.synthesizer` leer, fasst das erste Ratsmitglied zusammen.
+Ist `council.synthesizer` leer, schreibt das erste Ratsmitglied die finale Antwort.
 
-Diese Felder werden beim Tippen automatisch in `config.json` gespeichert. Sie überstehen also F5 und einen
-Neustart und gelten auf allen Geräten im Heimnetz: Speed-Test-Prompt, Council-Frage, Chat-System-Prompt,
+Diese Felder werden beim Tippen automatisch gespeichert. Sie überstehen also F5 und einen
+Neustart und gelten auf allen Geräten im Heimnetz: Speed-Test-Prompt, Chat-System-Prompt,
 `keep_alive`, Timeout und Modell-Optionen. Ungültige Eingaben (kaputtes JSON, Timeout unter 10 s) werden nicht
 gespeichert, das Feld zeigt dann einen Hinweis.
 
@@ -330,9 +440,35 @@ Mehrere Personen können die App gleichzeitig benutzen, jede mit **eigenem Konto
 - Passwort vergessen oder ausgesperrt: auf dem Server `.venv/bin/python -m app --set-password --user NAME`
   (ein unbekannter Name wird als neuer Admin angelegt); `--list-users` zeigt die Konten.
 
-**Gleichzeitig arbeiten:** Wie viele Anfragen Ollama wirklich parallel beantwortet, bestimmen
-`OLLAMA_NUM_PARALLEL` (Anfragen pro Modell) und `OLLAMA_MAX_LOADED_MODELS`. Alles darüber wartet in Ollamas
-Warteschlange. Fragen mehrere Personen verschiedene große Modelle an, lädt Ollama sie abwechselnd, das kostet Zeit.
+- **Speicherplatz:** Anhänge, Wissensbasen und Chats zählen pro Benutzer gegen `limits.user_mb` (Standard 1 GB),
+  alles zusammen gegen `limits.total_mb` (20 GB); einstellbar unter Einstellungen → Benutzer. „Mein Konto“ zeigt
+  den eigenen Verbrauch.
+- **Anhänge** werden pro Inhalt einmal gespeichert, aber jeder, der eine Datei hochlädt, wird als Besitzer
+  eingetragen. Lesen, an Chats hängen oder in eine Wissensbasis übernehmen darf eine Datei nur, wer sie selbst
+  hochgeladen hat.
+
+### Warteschlange für die GPU
+
+Es gibt eine GPU und mehrere Benutzer. Damit Ollama nicht ständig Modelle hin- und herlädt, laufen
+**Aufträge nacheinander**: eine Chat-Antwort (mit ihren Werkzeug-Aufrufen), ein ganzer Council-Lauf, ein
+Speed-Test-Lauf, das Einlesen eines Dokuments, ein Chat-Titel oder „Modell laden“. Wer warten muss, sieht im Chat
+„Du bist #2 in der Warteschlange“ und kann mit **Stopp** abbrechen. Wie viele Aufträge gleichzeitig laufen, stellt
+ein Admin unter Einstellungen → Ollama ein („Gleichzeitige Aufträge“, Standard 1). Ein Council-Lauf zählt als ein
+Auftrag; ob seine Mitglieder untereinander gleichzeitig antworten, regelt „Mitglieder gleichzeitig“ beim Council.
+Höhere Werte lohnen sich nur, wenn alle dasselbe Modell nutzen und `OLLAMA_NUM_PARALLEL` entsprechend gesetzt ist.
+
+### Isolation testen
+
+`tests/test_isolation.py` legt in einem temporären Ordner (die echten Daten bleiben unberührt) einen Admin und
+zwei Benutzer an und prüft über die API, dass Benutzer B von A nichts lesen, auflisten, exportieren, durchsuchen,
+löschen oder herunterladen kann (Chats, Wissensbasen, Einstellungen, Erinnerungen, Bewertungen, Anhänge,
+Einzel- und ZIP-Export, Suche), dass normale Benutzer auf alle Admin-Routen 403 bekommen, dass Passwort-Reset und
+Löschen eines Kontos dessen Sitzungen beenden, die Login-Sperre pro Adresse und pro Konto, die Speichergrenzen
+und dass „Webseite lesen“ nur erlaubte Adressen abruft. Braucht kein Ollama:
+
+```bash
+.venv/bin/python tests/test_isolation.py
+```
 
 Weitere Schutzmaßnahmen, die immer aktiv sind:
 
@@ -358,8 +494,6 @@ Tailscale) nutzen.
 ## Bekannte Einschränkungen
 
 - **Kein HTTPS:** Passwort und Cookie gehen im Heimnetz unverschlüsselt über die Leitung.
-- **Anhänge** liegen für alle gemeinsam in `data/uploads/`, adressiert über einen Hash ihres Inhalts. Abrufen kann
-  eine Datei nur, wer ihre ID kennt, praktisch also nur, wer die Datei selbst hat.
 - **Chats speichert der Browser:** Wird ein Tab mitten in einer Antwort geschlossen, ist die Frage gespeichert, die
   Teilantwort nicht. Bearbeiten zwei Geräte gleichzeitig denselben Chat, gewinnt der zuletzt gespeicherte Stand.
 - **Kontext-Anzeige ist geschätzt** (≈ 3,5 Zeichen pro Token). Ohne eigene Einstellung nutzt Ollama nur 4096
@@ -374,8 +508,13 @@ Tailscale) nutzen.
   oder verlässt sich doch auf einen veralteten Ausschnitt. Die Quellenliste unter der Antwort zeigt, worauf es
   sich stützt. Viele Webseiten liefern SearXNG kein Datum.
 - **Websuche** braucht eine eigene SearXNG-Instanz.
-- **„Webseite lesen“:** Zwischen Prüfung der Adresse und Abruf könnte ein präparierter DNS-Server theoretisch
-  eine andere Adresse liefern (DNS-Rebinding); sehr unwahrscheinlich, aber nicht ausgeschlossen.
+- **„Webseite lesen“** liest nur Adressen aus Suchergebnissen derselben Anfrage oder solche, die du selbst
+  geschrieben hast (gegen das Herausschicken von Chat-Inhalten über präparierte Links). Suchergebnisse früherer
+  Nachrichten zählen nicht; dann sucht das Modell erneut. Die Adresse wird einmal aufgelöst, geprüft und genau
+  diese IP verbunden (kein DNS-Rebinding).
+- **Council:** Bewertungen durch kleine Modelle schwanken stark. Mehrere Mitglieder auf einer 12-GB-GPU heißt
+  meist: nacheinander laden; mit verschiedenen großen Modellen dauert ein Lauf entsprechend.
+- **Code-Modus** braucht Docker-Zugriff für die App und das gebaute Image (siehe Code-Modus).
 - **Formeln:** KaTeX kann nicht alles, was LaTeX kann (z. B. keine eigenen Pakete, kein TikZ). Die Thinking-Ausgabe
   wird als reiner Text gezeigt.
 - **Speed-Test:** Gleichzeitige Läufe teilen sich GPU und CPU; Tokens/s sind dann nicht mit Einzelläufen vergleichbar.
@@ -383,7 +522,8 @@ Tailscale) nutzen.
 ## Council-Prompts anpassen
 
 Die Prompts für Diskussion und Zusammenfassung stehen als Konstanten oben in `app/modes/council.py`
-(`SYSTEM_PROMPT`, `DISCUSSION_PROMPT`, `SYNTHESIS_PROMPT`). Sie sind auf Englisch, weil das bei kleinen
+(`SYSTEM_PROMPT`, `ROLE_PROMPT`, `DISCUSSION_PROMPT`, `SYNTHESIS_PROMPT`), die Rollen-Vorlagen in
+`static/council.js` (`ROLE_PRESETS`), der Richter-Prompt in `app/judge.py`. Sie sind auf Englisch, weil das bei kleinen
 Modellen meist zuverlässiger funktioniert. Die Modelle sollen aber in der Sprache der Frage antworten.
 
 ## Projektstruktur
@@ -402,14 +542,21 @@ Local-Council/
 │   ├── export.py        # Export als Markdown/JSON/ZIP
 │   ├── auth.py          # Passwort-Hashes, signierte Cookies, Host-Prüfung
 │   ├── users.py         # Benutzerkonten, Einstellungen pro Benutzer, Umstieg vom alten Passwort
+│   ├── storage.py       # wer welche Anhänge lesen darf, Speichergrenzen
+│   ├── gpu.py           # Warteschlange für GPU-Aufträge
+│   ├── memory.py        # Erinnerungen pro Benutzer, Vorschläge aus Antworten
+│   ├── judge.py         # Bewertung von Council-Antworten
+│   ├── sandbox.py       # Code-Modus: Python im Docker-Container
+│   ├── codechunks.py    # Quelltext für Wissensbasen (ZIP/Ordner, nach Funktionen aufgeteilt)
 │   ├── rag.py           # Wissensbasen: Abschnitte, Embeddings, Suche
 │   ├── tools.py         # Werkzeuge für Tool-Calling (Rechner, Datum, Web)
 │   ├── websearch.py     # SearXNG-Suche, Webseiten als Text (nur öffentliche Adressen)
 │   └── modes/
 │       ├── runner.py    # gemeinsamer Baustein: Jobs parallel/seriell ausführen, Streams zusammenführen
 │       ├── speedtest.py # Modus 1
-│       ├── council.py   # Modus 2 (inkl. Prompts für Diskussion & Zusammenfassung)
-│       └── chat.py      # Modus 3: Wissensbasis, Websuche und Werkzeug-Schleife um die Antwort
+│       ├── agent.py     # ein Modell antwortet, mit Werkzeug-Schleife (Chat und Council-Mitglieder)
+│       ├── council.py   # Council: Rollen, Runden, geteilte Recherche, Kontextprüfung, Überspringen, Bewertung
+│       └── chat.py      # Chat: Wissensbasis und Websuche vorbereiten, dann agent
 ├── static/              # Frontend: reines HTML/CSS/JS, kein Build-Schritt
 │   ├── index.html
 │   ├── style.css
@@ -427,11 +574,17 @@ Local-Council/
 │   ├── context.js       # Kontext-Anzeige und Warnung
 │   ├── chat-tools.js    # Suche, Umbenennen, Export, Auto-Titel, Chatliste auf dem Handy
 │   ├── rag.js           # Wissensbasen und Websuche (Einstellungen)
-│   ├── app.js           # Speed-Test, Council, Einstellungen, Start
+│   ├── council.js       # Council-Sitzungen im Chat: Mitglieder/Rollen, Runden-Ansicht, Bewertung
+│   ├── memory.js        # Erinnerungen: Einstellungen, Vorschläge unter Antworten
+│   ├── code.js          # Code-Modus: Ausführen-Knopf, Ausgabe, Sandbox-Einstellungen, Code-Ordner
+│   ├── app.js           # Speed-Test, Einstellungen, Start
 │   └── vendor/          # marked, DOMPurify, highlight.js, KaTeX (unverändert, mit Lizenz-Hinweis)
 ├── data/                # Konten, Messdaten, Chats, Anhänge, Wissensbasen, nicht im Git
 ├── deploy/
-│   └── local-council.service  # systemd-Dienst für den Autostart
+│   ├── local-council.service  # systemd-Dienst für den Autostart
+│   └── sandbox/Dockerfile     # Image für den Code-Modus
+├── tests/
+│   └── test_isolation.py      # Isolation zwischen Benutzern, Admin-Rechte, Sitzungen, Speichergrenzen
 ├── config.example.json  # Standardkonfiguration (Vorlage für config.json)
 ├── requirements.txt
 └── run.sh
@@ -453,8 +606,16 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream (Admin) |
 | GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen (Admin) |
 | POST | `/api/speedtest/history/prune` | `{keep: 3}` → behält pro Modell und Modus nur die neuesten `keep` Messungen (Admin) |
-| POST | `/api/council` | `{question, members?, synthesizer?, rounds?, parallel?}` → NDJSON-Stream |
-| POST | `/api/chat` | `{messages: [{role, content, attachments?}], model?, system?, options?, think?, knowledge?, tools?, web?}` → NDJSON-Stream |
+| POST | `/api/council` | `{messages, members: [{model, role, system}], synthesizer?, rounds, parallel, tools, web, tool_steps, knowledge?, judge?, memory}` → NDJSON-Stream |
+| POST | `/api/council/{run}/skip` | Diskussion beenden, finale Antwort schreiben lassen |
+| GET | `/api/judge` | eigene Council-Bewertungen |
+| GET / POST / PUT | `/api/memory` | Erinnerungen lesen / `{text}` hinzufügen / `{enabled}` an/aus |
+| PATCH / DELETE | `/api/memory/{id}` | Erinnerung ändern / löschen |
+| GET | `/api/code` | darf ich Code ausführen, ist die Sandbox bereit? |
+| POST | `/api/code/run` | `{code}` → `{stdout, stderr, error, images, seconds, timed_out}` |
+| POST | `/api/rag/{id}/folder` | `{path}` Code-Ordner einlesen (Admin) → NDJSON-Fortschritt |
+| GET | `/api/queue`, `/api/storage` | Auslastung der Warteschlange; eigener Speicherverbrauch |
+| POST | `/api/chat` | `{messages: [{role, content, attachments?}], model?, system?, options?, think?, knowledge?, tools?, web?, memory?, code?}` → NDJSON-Stream |
 | POST | `/api/uploads?name=…` | Datei als roher Body → Metadaten mit `id` (für `attachments`) |
 | GET | `/api/uploads/{id}` | die hochgeladene Datei |
 | GET | `/api/chats` | Liste der gespeicherten Chats (id, title, model, created, updated, count) |

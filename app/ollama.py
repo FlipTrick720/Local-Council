@@ -119,13 +119,14 @@ class OllamaClient:
 
     async def chat_stream(
         self, model: str, messages: list[dict], options: dict | None = None, think: bool | None = None,
-        tools: list[dict] | None = None,
+        tools: list[dict] | None = None, format: str | dict | None = None,
     ) -> AsyncIterator[dict]:
         """Yields {"type": "thinking"|"content", "text": ...} chunks, {"type": "tool_calls", "calls": [...]} when
         the model wants to call tools, then one {"type": "stats", ...}.
 
         `options` are merged over the configured ones. `think` switches reasoning on/off for thinking models;
-        None leaves it to the model. `tools` are function definitions in Ollama's format.
+        None leaves it to the model. `tools` are function definitions in Ollama's format. `format` ("json" or a
+        JSON schema) makes the model answer with JSON only.
         """
         body = {
             "model": model,
@@ -139,6 +140,8 @@ class OllamaClient:
             body["think"] = think
         if tools:
             body["tools"] = tools
+        if format:
+            body["format"] = format
 
         start = time.perf_counter()
         first = None

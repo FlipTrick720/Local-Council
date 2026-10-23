@@ -14,7 +14,7 @@ import time
 COOKIE = "lc_session"
 MAX_AGE = 30 * 24 * 3600
 ITERATIONS = 200_000
-MAX_FAILURES = 10        # wrong passwords per client address …
+MAX_FAILURES = 10        # wrong passwords per client address and per account name …
 FAILURE_WINDOW = 15 * 60  # … within this many seconds, then logins from it are refused until the window passes
 LOCAL_SUFFIXES = ("", ".local", ".lan", ".home", ".home.arpa", ".internal", ".fritz.box")
 
@@ -38,19 +38,26 @@ def check_hash(stored: str, password: str) -> bool:
     return hmac.compare_digest(_hash(password, salt), expected)
 
 
-def login_blocked(client: str) -> bool:
+def login_keys(client: str, user: str) -> list[str]:
+    """Failures count per address (one device guessing many names) and per name (many devices guessing one)."""
+    return [f"ip:{client}", f"user:{user}"]
+
+
+def login_blocked(keys: list[str]) -> bool:
     now = time.time()
-    recent = [t for t in _failures.get(client, []) if now - t < FAILURE_WINDOW]
-    _failures[client] = recent
-    return len(recent) >= MAX_FAILURES
+    for key in keys:
+        _failures[key] = [t for t in _failures.get(key, []) if now - t < FAILURE_WINDOW]
+    return any(len(_failures[key]) >= MAX_FAILURES for key in keys)
 
 
-def record_failure(client: str) -> None:
-    _failures.setdefault(client, []).append(time.time())
+def record_failure(keys: list[str]) -> None:
+    for key in keys:
+        _failures.setdefault(key, []).append(time.time())
 
 
-def reset_failures(client: str) -> None:
-    _failures.pop(client, None)
+def reset_failures(keys: list[str]) -> None:
+    for key in keys:
+        _failures.pop(key, None)
 
 
 def host_allowed(host_header: str, cfg: dict) -> bool:

@@ -83,12 +83,17 @@ def format_results(results: list[dict], offset: int = 0) -> str:
     return "\n".join(lines).rstrip()
 
 
-async def _check_public(url: str) -> None:
+async def _pin(url: str) -> tuple[str, dict, dict]:
+    """Resolves the host once, checks that every address is public, and returns the URL with the host replaced by
+    the first address, plus the Host header and TLS name to send. The connection then goes exactly to the checked
+    address: a DNS server cannot answer the check with a public address and the download with a LAN one
+    (DNS rebinding)."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise WebError("Nur http- und https-Adressen.")
     try:
-        infos = await asyncio.to_thread(socket.getaddrinfo, parsed.hostname, None)
+        infos = await asyncio.to_thread(socket.getaddrinfo, parsed.hostname, parsed.port or None,
+                                        type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise WebError(f"Adresse nicht gefunden: {parsed.hostname}") from e
     for info in infos:
@@ -97,6 +102,13 @@ async def _check_public(url: str) -> None:
             ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
         if not ip.is_global:
             raise WebError("Adressen im lokalen Netz werden nicht abgerufen.")
+    ip = ipaddress.ip_address(infos[0][4][0].split("%")[0])
+    host = f"[{ip}]" if ip.version == 6 else str(ip)
+    port = f":{parsed.port}" if parsed.port else ""
+    pinned = parsed._replace(netloc=host + port).geturl()
+    headers = {"Host": parsed.hostname + port}
+    extensions = {"sni_hostname": parsed.hostname} if parsed.scheme == "https" else {}
+    return pinned, headers, extensions
 
 
 class _TextExtractor(HTMLParser):
@@ -130,13 +142,13 @@ def html_to_text(html: str) -> str:
 
 
 async def fetch_text(url: str, max_chars: int = 6000) -> str:
-    """The readable text of a public web page. Redirects are followed by hand, each target checked again;
-    at most MAX_PAGE_BYTES are downloaded."""
+    """The readable text of a public web page. Redirects are followed by hand, each target checked and pinned
+    again (see _pin); at most MAX_PAGE_BYTES are downloaded."""
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=HEADERS, follow_redirects=False) as client:
         for _ in range(4):
-            await _check_public(url)
+            pinned, headers, extensions = await _pin(url)
             try:
-                async with client.stream("GET", url) as r:
+                async with client.stream("GET", pinned, headers=headers, extensions=extensions) as r:
                     if r.is_redirect and "location" in r.headers:
                         url = urljoin(url, r.headers["location"])
                         continue

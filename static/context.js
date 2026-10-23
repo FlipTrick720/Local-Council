@@ -20,6 +20,9 @@ function kTokens(n) {
 // Window size: chat setting > global model options > what Ollama reports for the loaded model > default.
 function contextWindow(chat) {
   const set = chat.options?.num_ctx ?? state.config.ollama.options?.num_ctx;
+  if (chat.kind === 'council' && !set) {
+    return { size: state.config.council.max_ctx || 16384, source: 'pro Mitglied; wird bei Bedarf bis council.max_ctx erhöht' };
+  }
   if (set) return { size: set, source: 'aus den Einstellungen' };
   if (chat.web && state.config.web?.num_ctx) return { size: state.config.web.num_ctx, source: 'für die Websuche (web.num_ctx)' };
   const loaded = loadedModels?.find((m) => m.name === $('chat-model').value);
@@ -35,10 +38,12 @@ function messageTokens(m) {
 // The last answer's real numbers (prompt + reply tokens) cover everything up to it; only what came after
 // is estimated.
 function contextUsage(chat) {
+  if (chat.kind === 'council') return councilUsage(chat);
   const msgs = chat.messages;
   let i = msgs.length - 1;
   while (i >= 0 && !(msgs[i].role === 'assistant' && msgs[i].stats)) i--;
-  let tokens = i >= 0 ? msgs[i].stats.prompt_tokens + msgs[i].stats.tokens : estimateTokens((chat.system || '').length);
+  let tokens = i >= 0 ? msgs[i].stats.prompt_tokens + msgs[i].stats.tokens
+    : estimateTokens((chat.system || '').length) + memoryTokens(chat);
   for (const m of msgs.slice(i + 1)) tokens += messageTokens(m);
   tokens += messageTokens({ content: $('chat-text').value, attachments: pendingMetas() });
   return { tokens, cutBefore: i >= 0 && msgs[i].stats.prompt_tokens + msgs[i].stats.tokens >= 0.98 * contextWindow(chat).size };
@@ -59,8 +64,10 @@ async function renderContextMeter() {
   const level = ratio > 1 || cutBefore ? 'err' : ratio > 0.8 ? 'warn' : '';
   const meter = $('chat-ctx');
   meter.className = `ctx ${level}`;
-  meter.title = `Kontextfenster ${ctx.size} Tokens (${ctx.source}). Belegung geschätzt.`;
-  meter.replaceChildren(el('span', null, `Kontext ~${kTokens(tokens)} / ${kTokens(ctx.size)}`));
+  const mem = memoryTokens(chat);
+  meter.title = `Kontextfenster ${ctx.size} Tokens (${ctx.source}). Belegung geschätzt`
+    + (mem ? `, davon ~${mem} Tokens Erinnerungen.` : '.');
+  meter.replaceChildren(el('span', null, `Kontext ~${kTokens(tokens)} / ${kTokens(ctx.size)}${mem ? ` · 🧠 ${kTokens(mem)}` : ''}`));
   const bar = el('span', 'ctx-bar');
   const fill = el('span');
   fill.style.width = `${Math.min(100, ratio * 100).toFixed(0)}%`;

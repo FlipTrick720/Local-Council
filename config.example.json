@@ -10,6 +10,9 @@
     "keep_alive": "5m",
     "options": {}
   },
+  "queue": {
+    "parallel": 1
+  },
   "speedtest": {
     "models": [],
     "parallel": true,
@@ -21,8 +24,10 @@
     "members": [],
     "synthesizer": "",
     "rounds": 2,
-    "question": "",
-    "parallel": true
+    "parallel": false,
+    "tool_steps": 3,
+    "judge": "",
+    "max_ctx": 16384
   },
   "chat": {
     "model": "",
@@ -57,6 +62,20 @@
     "searxng_url": "",
     "max_results": 10,
     "num_ctx": 16384
+  },
+  "code": {
+    "allow_users": false,
+    "model": "qwen2.5-coder:14b",
+    "docker": "docker",
+    "image": "local-council-sandbox:1",
+    "timeout": 30,
+    "cpus": 1,
+    "memory_mb": 512,
+    "roots": []
+  },
+  "limits": {
+    "user_mb": 1024,
+    "total_mb": 20480
   },
   "auth": {
     "secret": ""

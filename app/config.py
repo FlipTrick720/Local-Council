@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_PATH = ROOT / "config.example.json"
 CONFIG_PATH = Path(os.environ.get("COUNCIL_CONFIG", ROOT / "config.json"))
+DATA = Path(os.environ.get("COUNCIL_DATA", ROOT / "data"))  # everything stored at runtime (tests use a temp dir)
 
 # Requests are handled in parallel threads; this keeps read-modify-write of config.json in one piece.
 _lock = threading.RLock()

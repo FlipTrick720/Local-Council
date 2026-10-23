@@ -9,7 +9,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import auth, chats, config, export, history, rag, titles, uploads, users, websearch
+from app import (auth, chats, config, export, gpu, history, judge, memory, rag, sandbox, storage, titles, tools, uploads,
+                 users, websearch)
 from app.config import ROOT
 from app.modes import chat, council, speedtest
 from app.ollama import OllamaClient, OllamaError
@@ -78,18 +79,35 @@ class SpeedtestRequest(BaseModel):
     record: bool = True  # False for benchmark warm-up runs
 
 
-class CouncilRequest(BaseModel):
-    question: str = Field(min_length=1)
-    members: list[str] | None = None
-    synthesizer: str | None = None
-    rounds: int | None = Field(default=None, ge=0, le=5)
-    parallel: bool | None = None
-
-
 class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     attachments: list[str] = []  # upload ids, see app.uploads
+    members: list[dict] = []  # Council answers: the members' final positions [{label, role, content}]
+
+
+class CouncilMember(BaseModel):
+    model: str = Field(min_length=1)
+    role: str = Field(default="", max_length=60)
+    system: str = Field(default="", max_length=4000)
+
+
+class CouncilRequest(BaseModel):
+    """A question to the Council; `messages` is the whole session, the last one the new question."""
+    messages: list[Message] = Field(min_length=1)
+    members: list[CouncilMember] = Field(min_length=2, max_length=6)
+    synthesizer: str | None = None
+    rounds: int = Field(default=2, ge=0, le=5)
+    parallel: bool = False
+    options: dict | None = None
+    think: bool | None = None
+    knowledge: str | None = None
+    tools: bool = False
+    web: bool = False
+    tool_steps: int = Field(default=3, ge=1, le=5)
+    judge: str | None = None  # model that scores the answers afterwards
+    memory: bool = False
+    chat_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -101,6 +119,8 @@ class ChatRequest(BaseModel):
     knowledge: str | None = None  # knowledge base id (RAG)
     tools: bool = False
     web: bool = False
+    memory: bool = False  # put the user's remembered facts into the system prompt (app.memory)
+    code: bool = False  # code mode: the model writes runnable Python for the sandbox (app.sandbox)
 
 
 class ModelRequest(BaseModel):
@@ -133,8 +153,12 @@ def public_config(cfg: dict) -> dict:
 
 @app.get("/api/config")
 def get_config(user: User):
-    """The user's view of the config: their own sections (users.USER_SECTIONS) on top of config.json."""
-    return public_config(users.config_for(user))
+    """The user's view of the config: their own sections (users.USER_SECTIONS) on top of config.json. Folders on the
+    server (code.roots) are only shown to admins."""
+    cfg = public_config(users.config_for(user))
+    if not is_admin(user):
+        cfg["code"] = {k: v for k, v in cfg.get("code", {}).items() if k != "roots"}
+    return cfg
 
 
 @app.put("/api/config")
@@ -180,15 +204,15 @@ def _with_cookie(response: Response, user: str) -> Response:
 async def login(req: LoginRequest, request: Request):
     if users.open_user():
         return {"ok": True}
-    client = request.client.host if request.client else "?"
-    if auth.login_blocked(client):
-        raise HTTPException(429, "Zu viele falsche Versuche. Bitte in 15 Minuten wieder versuchen.")
     name = req.username.strip().lower()
+    keys = auth.login_keys(request.client.host if request.client else "?", name)
+    if auth.login_blocked(keys):
+        raise HTTPException(429, "Zu viele falsche Versuche. Bitte in 15 Minuten wieder versuchen.")
     if not users.check_password(name, req.password):
-        auth.record_failure(client)
+        auth.record_failure(keys)
         await asyncio.sleep(1)  # slows down guessing
         raise HTTPException(401, "Benutzername oder Passwort falsch.")
-    auth.reset_failures(client)
+    auth.reset_failures(keys)
     return _with_cookie(JSONResponse({"ok": True}), name)
 
 
@@ -233,7 +257,7 @@ def _users_call(fn, *args, **kwargs):
 
 @app.get("/api/users", dependencies=ADMIN)
 def list_users():
-    return users.list_all()
+    return [{**u, "used": storage.usage(u["name"])} for u in users.list_all()]
 
 
 @app.post("/api/users", dependencies=ADMIN)
@@ -256,6 +280,7 @@ def delete_user(name: str, admin: AdminUser):
     if name == admin:
         raise HTTPException(400, "Das eigene Konto kann man nicht löschen.")
     _users_call(users.delete, name)
+    uploads.forget_owner(name)
     uploads.collect_garbage(chats.referenced_uploads() | rag.referenced_uploads())
     return {"deleted": name}
 
@@ -277,8 +302,9 @@ async def get_loaded_models():
 
 
 @app.post("/api/models/load")
-async def load_model(req: ModelRequest):
-    return await _set_loaded(req.model, True)
+async def load_model(req: ModelRequest, user: User):
+    async with gpu.slot(user, "Modell laden"):  # loading may push out the model someone else is using
+        return await _set_loaded(req.model, True)
 
 
 @app.post("/api/models/unload", dependencies=ADMIN)
@@ -303,14 +329,15 @@ async def show_model(req: ModelRequest):
         raise HTTPException(502, str(e))
 
 
-@app.post("/api/speedtest", dependencies=ADMIN)
-def post_speedtest(req: SpeedtestRequest):
+@app.post("/api/speedtest")
+def post_speedtest(req: SpeedtestRequest, user: AdminUser):
     cfg = config.load()
     models = _unique(req.models if req.models is not None else cfg["speedtest"]["models"])
     if not models:
         raise HTTPException(400, "Keine Modelle für den Speed-Test ausgewählt.")
     parallel = req.parallel if req.parallel is not None else cfg["speedtest"]["parallel"]
-    return ndjson(speedtest.run(OllamaClient.from_config(cfg), models, req.prompt, parallel, req.record))
+    return ndjson(gpu.queued(user, "Speed-Test", speedtest.run(OllamaClient.from_config(cfg), models, req.prompt,
+                                                               parallel, req.record)))
 
 
 @app.get("/api/speedtest/history", dependencies=ADMIN)
@@ -330,14 +357,46 @@ def prune_speedtest_history(req: PruneRequest):
 @app.post("/api/council")
 def post_council(req: CouncilRequest, user: User):
     cfg = users.config_for(user)
-    c = cfg["council"]
-    members = _unique(req.members if req.members is not None else c["members"])
-    if len(members) < 2:
-        raise HTTPException(400, "Der Council braucht mindestens zwei Modelle.")
-    synthesizer = req.synthesizer or c["synthesizer"] or members[0]
-    rounds = req.rounds if req.rounds is not None else c["rounds"]
-    parallel = req.parallel if req.parallel is not None else c["parallel"]
-    return ndjson(council.run(OllamaClient.from_config(cfg), members, synthesizer, req.question, rounds, parallel))
+    if req.messages[-1].role != "user":
+        raise HTTPException(400, "Die letzte Nachricht muss die Frage sein.")
+    messages = _expanded(req.messages, user)
+    question = messages[-1]
+    return ndjson(gpu.queued(user, "Council", memory.with_proposals(council.run(
+        OllamaClient.from_config(cfg), user=user, members=[m.model_dump() for m in req.members],
+        synthesizer=req.synthesizer or req.members[0].model, question=question["content"],
+        images=question.get("images", []), history=[{**m, "members": r.members} for m, r in zip(messages[:-1], req.messages)],
+        rounds=req.rounds, parallel=req.parallel, cfg=cfg, options=req.options, think=req.think,
+        knowledge=req.knowledge, use_tools=req.tools, web=req.web, tool_steps=req.tool_steps, judge_model=req.judge,
+        extra_system=memory.facts_block(user) if req.memory else "",
+        final_extra=memory.PROPOSE if req.memory and memory.load(user).get("enabled", True) else "",
+        allowed_urls=_typed_urls(req.messages), chat_id=req.chat_id), final_member="final")))
+
+
+@app.post("/api/council/{run_id}/skip")
+def skip_council(run_id: str, user: User):
+    """Ends the discussion of a running Council early; the final answer is written from what is there."""
+    if not council.skip(run_id, user):
+        raise HTTPException(404, "Kein laufender Council mit dieser Nummer.")
+    return {"ok": True}
+
+
+@app.get("/api/judge")
+def get_judge_scores(user: User):
+    """All judge scores of the user's Council runs (see app.judge)."""
+    return judge.load(user)
+
+
+def _expanded(messages: list[Message], user: str) -> list[dict]:
+    """Messages for Ollama, with attached files put in. Files the user may not read (someone else's id) are left
+    out, as if they did not exist."""
+    return [uploads.expand({**m.model_dump(exclude={"members"}),
+                            "attachments": [a for a in m.attachments if storage.can_read(user, a)]})
+            for m in messages]
+
+
+def _typed_urls(messages: list[Message]) -> set[str]:
+    """URLs the user wrote (not those in attached files): fetch_url may read them."""
+    return set().union(*(tools.urls_in(m.content) for m in messages if m.role == "user"))
 
 
 @app.post("/api/chat")
@@ -347,9 +406,15 @@ def post_chat(req: ChatRequest, user: User):
     if not model:
         raise HTTPException(400, "Kein Chat-Modell ausgewählt.")
     system = req.system if req.system is not None else cfg["chat"]["system"]
-    messages = [uploads.expand(m.model_dump()) for m in req.messages]
-    return ndjson(chat.run(OllamaClient.from_config(cfg), model, messages, system, req.options, req.think,
-                           knowledge=req.knowledge, use_tools=req.tools, web=req.web, cfg=cfg, user=user))
+    messages = _expanded(req.messages, user)
+    if req.memory:
+        system = "\n\n".join(p for p in (system.strip(), memory.system_block(user)) if p)
+    if req.code and code_allowed(user, cfg):
+        s = sandbox.settings(cfg)
+        system = "\n\n".join(p for p in (CODE_PROMPT.format(timeout=s["timeout"], memory=s["memory_mb"]), system) if p)
+    return ndjson(gpu.queued(user, "Chat", memory.with_proposals(chat.run(
+        OllamaClient.from_config(cfg), model, messages, system, req.options, req.think, knowledge=req.knowledge,
+        use_tools=req.tools, web=req.web, cfg=cfg, user=user, allowed_urls=_typed_urls(req.messages)))))
 
 
 class ChatDoc(BaseModel, extra="allow"):
@@ -388,7 +453,8 @@ async def make_title(req: TitleRequest, user: User):
     if not model:
         raise HTTPException(400, "Kein Modell für den Titel.")
     try:
-        return {"title": await titles.generate(OllamaClient.from_config(cfg), model, req.question, req.answer)}
+        async with gpu.slot(user, "Titel"):
+            return {"title": await titles.generate(OllamaClient.from_config(cfg), model, req.question, req.answer)}
     except OllamaError as e:
         raise HTTPException(502, str(e))
 
@@ -438,8 +504,120 @@ def delete_chat(chat_id: str, user: User):
     return {"deleted": chat_id}
 
 
+# ---------- Code mode ----------
+
+CODE_PROMPT = """You are in code mode. When code helps to answer, write one complete, runnable Python 3 script in a \
+single ```python block. The user can run it with one click in a sandbox: Python 3.12 with numpy, pandas, scipy, \
+sympy and matplotlib; no internet, no access to the user's files, at most {timeout} seconds and {memory} MB of memory. \
+Print the results. For charts use matplotlib; plt.show() is captured and shown as an image. Keep the explanation \
+short. When the user sends you the output of a run, use it to fix or continue the code."""
+
+
+class CodeRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=100_000)
+
+
+def code_allowed(user: str, cfg: dict) -> bool:
+    return is_admin(user) or sandbox.settings(cfg)["allow_users"]
+
+
+@app.get("/api/code")
+async def get_code_status(user: User):
+    cfg = config.load()
+    allowed = code_allowed(user, cfg)
+    return {"allowed": allowed, **(await sandbox.status(cfg) if allowed else {"available": False, "reason": ""}),
+            "model": cfg.get("code", {}).get("model", "")}
+
+
+@app.post("/api/code/run")
+async def run_code(req: CodeRequest, user: User):
+    cfg = config.load()
+    if not code_allowed(user, cfg):
+        raise HTTPException(403, "Code ausführen darf hier nur ein Admin (Einstellungen → Code).")
+    try:
+        return await sandbox.run(cfg, req.code)
+    except sandbox.SandboxError as e:
+        raise HTTPException(503, str(e))
+
+
+class FolderRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+
+@app.post("/api/rag/{cid}/folder")
+def add_code_folder(cid: str, req: FolderRequest, user: AdminUser):
+    """Indexes the source code in a folder on the server; only admins, only inside code.roots."""
+    _rag_call(rag.get, user, cid)
+    cfg = config.load()
+    client = OllamaClient.from_config(cfg)
+
+    async def events():
+        try:
+            async for event in rag.add_folder(client, user, cid, req.path, cfg.get("code", {}).get("roots", [])):
+                yield event
+        except (rag.RagError, OllamaError) as e:
+            yield {"type": "error", "error": str(e)}
+
+    return ndjson(gpu.queued(user, "Wissensbasis", events()))
+
+
+# ---------- Memory ----------
+
+class FactRequest(BaseModel):
+    text: str
+
+
+class MemorySwitch(BaseModel):
+    enabled: bool
+
+
+def _memory_call(fn, *args):
+    try:
+        return fn(*args)
+    except memory.FactError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/memory")
+def get_memory(user: User):
+    return memory.summary(user)
+
+
+@app.put("/api/memory")
+def switch_memory(req: MemorySwitch, user: User):
+    memory.set_enabled(user, req.enabled)
+    return memory.summary(user)
+
+
+@app.post("/api/memory")
+def add_fact(req: FactRequest, user: User):
+    return _memory_call(memory.add, user, req.text)
+
+
+@app.patch("/api/memory/{item_id}")
+def edit_fact(item_id: str, req: FactRequest, user: User):
+    return _memory_call(memory.edit, user, item_id, req.text)
+
+
+@app.delete("/api/memory/{item_id}")
+def delete_fact(item_id: str, user: User):
+    memory.delete(user, item_id)
+    return {"deleted": item_id}
+
+
+@app.get("/api/queue")
+def get_queue():
+    return gpu.status()
+
+
+@app.get("/api/storage")
+def get_storage(user: User):
+    """The user's disk usage and limits, in bytes (0 = no limit)."""
+    return storage.summary(config.load(), user)
+
+
 @app.post("/api/uploads")
-async def post_upload(request: Request, name: str):
+async def post_upload(request: Request, name: str, user: User):
     """The file is the raw request body (no multipart), its name a query parameter."""
     too_big = HTTPException(413, f"Die Datei ist größer als {uploads.MAX_BYTES // 2**20} MB.")
     if int(request.headers.get("content-length") or 0) > uploads.MAX_BYTES:
@@ -450,13 +628,18 @@ async def post_upload(request: Request, name: str):
         if len(data) > uploads.MAX_BYTES:
             raise too_big
     try:
-        return uploads.store(name, bytes(data), request.headers.get("content-type", ""))
+        storage.check_upload(config.load(), user, bytes(data))
+        return uploads.store(name, bytes(data), request.headers.get("content-type", ""), owner=user)
+    except storage.StorageError as e:
+        raise HTTPException(413, str(e))
     except uploads.UploadError as e:
         raise HTTPException(400, str(e))
 
 
 @app.get("/api/uploads/{upload_id}")
-def get_upload(upload_id: str):
+def get_upload(upload_id: str, user: User):
+    if not storage.can_read(user, upload_id):
+        raise HTTPException(404, "Datei nicht gefunden.")
     try:
         m = uploads.meta(upload_id)
         return FileResponse(uploads.file_path(upload_id), media_type=m["type"], filename=m["name"],
@@ -502,7 +685,16 @@ def delete_collection(cid: str, user: User):
 def add_document(cid: str, req: DocumentRequest, user: User):
     """Indexes an uploaded file; streams {"type": "progress", "done", "total"} and finally the collection."""
     _rag_call(rag.get, user, cid)
-    client = OllamaClient.from_config(config.load())
+    if not storage.can_read(user, req.upload_id):
+        raise HTTPException(404, "Datei nicht gefunden.")
+    cfg = config.load()
+    try:
+        meta = uploads.meta(req.upload_id)
+        size = storage.index_estimate(meta.get("chars") or meta.get("size", 0))  # ZIP: its size as a rough guess
+        storage.check(cfg, user, size, size)
+    except storage.StorageError as e:
+        raise HTTPException(413, str(e))
+    client = OllamaClient.from_config(cfg)
 
     async def events():
         try:
@@ -511,7 +703,7 @@ def add_document(cid: str, req: DocumentRequest, user: User):
         except (rag.RagError, uploads.UploadError, OllamaError) as e:
             yield {"type": "error", "error": str(e)}
 
-    return ndjson(events())
+    return ndjson(gpu.queued(user, "Wissensbasis", events()))
 
 
 @app.delete("/api/rag/{cid}/documents/{upload_id}")

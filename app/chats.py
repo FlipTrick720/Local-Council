@@ -11,9 +11,9 @@ import threading
 from datetime import datetime
 
 from app import rag, uploads
-from app.config import ROOT
+from app.config import DATA
 
-DATA_DIR = ROOT / "data" / "chats"
+DATA_DIR = DATA / "chats"
 ID_RE = re.compile(r"^[a-z0-9-]{6,40}$")
 
 _lock = threading.RLock()
@@ -49,6 +49,7 @@ def summary(chat: dict) -> dict:
         "created": chat.get("created", ""),
         "updated": chat.get("updated", ""),
         "count": len(chat.get("messages", [])),
+        "kind": chat.get("kind", "chat"),
     }
 
 
@@ -132,10 +133,10 @@ def delete(user: str, chat_id: str) -> None:
         uploads.collect_garbage(referenced_uploads() | rag.referenced_uploads())
 
 
-def referenced_uploads() -> set[str]:
-    """Ids of all files attached to messages in any stored chat of any user."""
+def referenced_uploads(user: str | None = None) -> set[str]:
+    """Ids of all files attached to messages in the user's chats (without a user: in everyone's)."""
     ids = set()
-    for path in DATA_DIR.glob("*/*.json"):
+    for path in DATA_DIR.glob(f"{user}/*.json" if user else "*/*.json"):
         try:
             for msg in json.loads(path.read_text("utf-8")).get("messages", []):
                 ids.update(a["id"] for a in msg.get("attachments") or [] if isinstance(a, dict) and "id" in a)

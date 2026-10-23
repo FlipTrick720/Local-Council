@@ -5,8 +5,10 @@ Every user has their own knowledge bases. Stored in data/rag/<user>/<collection 
   collection.json     {"id", "name", "embed_model", "created", "docs": [{"id", "name", "chunks", "pages"}]}
   <upload id>.json    the chunk texts with their page numbers
   <upload id>.npy     the normalized embedding vectors, one row per chunk
-Documents come from app.uploads (text files and PDFs).
+Documents come from app.uploads (text files, PDFs, and ZIP files with source code) or, for code, from a folder on
+the server (admins, see app.codechunks); code is split along functions and classes.
 """
+import hashlib
 import json
 import math
 import re
@@ -18,11 +20,11 @@ from typing import AsyncIterator
 
 import numpy as np
 
-from app import uploads
-from app.config import ROOT
+from app import codechunks, uploads
+from app.config import DATA
 from app.ollama import OllamaClient
 
-DATA_DIR = ROOT / "data" / "rag"
+DATA_DIR = DATA / "rag"
 ID_RE = re.compile(r"^kb-[0-9a-f]{8}$")
 CHUNK_CHARS = 1200
 OVERLAP = 200  # characters repeated when a long paragraph has to be cut
@@ -97,6 +99,11 @@ def remove_document(user: str, cid: str, upload_id: str) -> dict:
         return collection
 
 
+def user_documents(user: str) -> set[str]:
+    """Ids of the uploads in the user's knowledge bases."""
+    return {d["id"] for c in list_all(user) for d in c["docs"]}
+
+
 def referenced_uploads() -> set[str]:
     """Ids of all documents in any user's knowledge bases."""
     return {d["id"] for c in _collections("*/kb-*/collection.json") for d in c["docs"]}
@@ -148,12 +155,37 @@ def _normalize(vectors) -> np.ndarray:
 # ---------- Indexing and search ----------
 
 async def add_document(client: OllamaClient, user: str, cid: str, upload_id: str) -> AsyncIterator[dict]:
-    """Chunks and embeds an uploaded document. Yields progress events, then the updated collection."""
-    collection = get(user, cid)
+    """Chunks and embeds an uploaded document (or the source code in a ZIP file). Yields progress events, then the
+    updated collection."""
     meta = uploads.meta(upload_id)
-    if meta["kind"] != "text":
-        raise RagError("Nur Textdateien und PDFs können in eine Wissensbasis.")
-    chunks = chunk(uploads.text(upload_id))
+    if meta["kind"] == "archive":
+        try:
+            files = codechunks.from_zip(uploads.file_path(upload_id).read_bytes())
+        except codechunks.CodeError as e:
+            raise RagError(str(e)) from e
+        chunks, pages = codechunks.chunks(files), None
+    elif meta["kind"] == "text":
+        chunks, pages = chunk(uploads.text(upload_id)), meta.get("pages")
+    else:
+        raise RagError("Nur Textdateien, PDFs und ZIP-Dateien mit Quelltext können in eine Wissensbasis.")
+    async for event in _index(client, user, cid, upload_id, meta["name"], chunks, pages):
+        yield event
+
+
+async def add_folder(client: OllamaClient, user: str, cid: str, folder: str, roots: list[str]) -> AsyncIterator[dict]:
+    """Indexes the source code in a folder on the server (inside code.roots). Indexing it again replaces it."""
+    try:
+        path, files = codechunks.from_folder(folder, roots)
+    except codechunks.CodeError as e:
+        raise RagError(str(e)) from e
+    doc_id = hashlib.sha256(path.encode()).hexdigest()[:24]  # stable, so re-indexing replaces the old version
+    async for event in _index(client, user, cid, doc_id, f"📁 {path}", codechunks.chunks(files), None):
+        yield event
+
+
+async def _index(client: OllamaClient, user: str, cid: str, doc_id: str, name: str, chunks: list[dict],
+                 pages: int | None) -> AsyncIterator[dict]:
+    collection = get(user, cid)
     if not chunks:
         raise RagError("Die Datei enthält keinen Text.")
     vectors = []
@@ -165,10 +197,10 @@ async def add_document(client: OllamaClient, user: str, cid: str, upload_id: str
     with _lock:
         collection = get(user, cid)
         folder = _dir(user, cid)
-        np.save(folder / f"{upload_id}.npy", _normalize(vectors))
-        _write_json(folder / f"{upload_id}.json", chunks)
-        doc = {"id": upload_id, "name": meta["name"], "chunks": len(chunks), "pages": meta.get("pages")}
-        collection["docs"] = [d for d in collection["docs"] if d["id"] != upload_id] + [doc]
+        np.save(folder / f"{doc_id}.npy", _normalize(vectors))
+        _write_json(folder / f"{doc_id}.json", chunks)
+        doc = {"id": doc_id, "name": name, "chunks": len(chunks), "pages": pages}
+        collection["docs"] = [d for d in collection["docs"] if d["id"] != doc_id] + [doc]
         _write_json(folder / "collection.json", collection)
     yield {"type": "done", "collection": collection}
 
@@ -190,7 +222,7 @@ def _load(user: str, cid: str) -> tuple[np.ndarray, list[dict]]:
         except (OSError, ValueError):
             continue
         matrices.append(matrix)
-        chunks += [{**c, "name": doc["name"]} for c in texts]
+        chunks += [{"name": doc["name"], **c} for c in texts]  # code chunks bring their own "path:lines" name
     vectors = np.vstack(matrices) if matrices else np.zeros((0, 1), dtype=np.float32)
     _cache[(user, cid)] = (signature, vectors, chunks)
     return vectors, chunks

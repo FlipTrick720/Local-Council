@@ -13,7 +13,6 @@
     <h1>Local Council</h1>
     <nav>
       <button data-tab="speed" data-admin>Speed-Test</button>
-      <button data-tab="council">Council</button>
       <button data-tab="chat">Chat</button>
       <button data-tab="settings">Einstellungen</button>
     </nav>
@@ -61,6 +60,7 @@
           <span id="bench-msg" class="hint"></span>
         </div>
       </div>
+      <p id="speed-queue" class="hint"></p>
       <div id="speed-table"></div>
       <div id="speed-cards" class="cards"></div>
       <div class="panel">
@@ -87,37 +87,13 @@
       </div>
     </section>
 
-    <!-- Council -->
-    <section id="tab-council" class="tab" hidden>
-      <div class="panel">
-        <label>Frage
-          <textarea id="council-question" rows="3" placeholder="Was soll der Rat beraten?"></textarea>
-        </label>
-        <div class="field"><span>Ratsmitglieder</span><div id="council-members" class="model-list"></div></div>
-        <div class="row">
-          <label>Zusammenfassung durch
-            <select id="council-synth"></select>
-          </label>
-          <label>Diskussionsrunden
-            <input type="number" id="council-rounds" min="0" max="5">
-          </label>
-          <label class="check"><input type="checkbox" id="council-parallel"> Mitglieder gleichzeitig</label>
-        </div>
-        <div class="actions">
-          <button id="council-run" class="primary">Rat einberufen</button>
-          <button id="council-stop" disabled>Stopp</button>
-          <button id="council-save" class="ghost">Auswahl als Standard speichern</button>
-        </div>
-      </div>
-      <div id="council-out"></div>
-    </section>
-
     <!-- Chat -->
     <section id="tab-chat" class="tab" hidden>
       <div class="chat-layout">
         <div id="chat-backdrop" class="drawer-backdrop" hidden></div>
         <aside id="chat-side" class="panel chat-side">
           <button id="chat-new" class="primary" type="button">+ Neuer Chat</button>
+          <button id="council-new" type="button" title="Mehrere Modelle beraten gemeinsam und schreiben eine finale Antwort">+ Neuer Council</button>
           <input id="chat-search" type="search" placeholder="Chats durchsuchen …" autocomplete="off">
           <div id="chat-list" class="chat-list"></div>
           <button id="chat-export-all" class="ghost small" type="button">Alle Chats exportieren (ZIP)</button>
@@ -133,7 +109,7 @@
                 <a id="chat-export-json" class="button ghost small" download>JSON</a>
               </span>
             </div>
-            <div class="row">
+            <div id="chat-model-row" class="row">
               <label>Modell für diesen Chat <select id="chat-model"></select></label>
               <div class="mem">
                 <span id="chat-mem" class="hint"></span>
@@ -142,16 +118,36 @@
                 <span id="chat-mem-msg" class="error"></span>
               </div>
             </div>
+            <div id="council-setup" hidden>
+              <div class="field"><span>Ratsmitglieder <small class="hint">(2 bis 6; jedes mit Modell und Rolle)</small></span>
+                <div id="cs-members" class="cs-members"></div>
+                <button id="cs-add" class="ghost small" type="button">+ Mitglied</button>
+              </div>
+              <div class="row">
+                <label>Finale Antwort durch <select id="cs-synth"></select></label>
+                <label class="compact">Diskussionsrunden <input type="number" id="cs-rounds" min="0" max="5"></label>
+                <label class="compact" title="Werkzeug-Aufrufe pro Mitglied und Runde">Werkzeug-Schritte <input type="number" id="cs-steps" min="1" max="5"></label>
+                <label class="check"><input type="checkbox" id="cs-parallel"> Mitglieder gleichzeitig</label>
+              </div>
+              <div class="row">
+                <label title="Ein Modell bewertet nach der finalen Antwort die ersten Antworten der Mitglieder (je ein Modell allein) und die finale Antwort.">Bewertung durch
+                  <select id="cs-judge"></select></label>
+                <button id="cs-save" class="ghost" type="button">Als Standard für neue Councils</button>
+                <span id="cs-msg" class="hint"></span>
+              </div>
+            </div>
             <details id="chat-settings">
               <summary>System-Prompt &amp; Einstellungen <span id="chat-settings-sum" class="hint"></span><span id="chat-settings-msg" class="hint"></span></summary>
-              <div class="row">
-                <label>Vorlage <select id="chat-preset"></select></label>
-                <button id="preset-save" class="ghost" type="button">Als Vorlage speichern …</button>
-                <button id="preset-delete" class="ghost" type="button">Vorlage löschen</button>
+              <div id="chat-system-box">
+                <div class="row">
+                  <label>Vorlage <select id="chat-preset"></select></label>
+                  <button id="preset-save" class="ghost" type="button">Als Vorlage speichern …</button>
+                  <button id="preset-delete" class="ghost" type="button">Vorlage löschen</button>
+                </div>
+                <label>System-Prompt
+                  <textarea id="chat-system" rows="3" placeholder="Optional, z. B. „Antworte knapp und auf Deutsch.“"></textarea>
+                </label>
               </div>
-              <label>System-Prompt
-                <textarea id="chat-system" rows="3" placeholder="Optional, z. B. „Antworte knapp und auf Deutsch.“"></textarea>
-              </label>
               <div id="chat-gen" class="row gen">
                 <label title="Nur für Thinking-Modelle wie qwen3 oder deepseek-r1">Denken
                   <select id="chat-think">
@@ -168,6 +164,10 @@
                 <label class="check"><input type="checkbox" id="chat-tools"> Werkzeuge
                   <small>(Rechner, Datum; mit Websuche auch Web und Webseiten lesen)</small></label>
                 <label class="check"><input type="checkbox" id="chat-web"> Websuche</label>
+                <label class="check" title="Das Modell schreibt ausführbaren Python-Code; Python-Blöcke bekommen einen Ausführen-Knopf (Sandbox ohne Internet)" hidden>
+                  <input type="checkbox" id="chat-code"> Code-Modus</label>
+                <label class="check" title="Deine gemerkten Fakten (Einstellungen → Erinnerungen) gehen mit in den System-Prompt">
+                  <input type="checkbox" id="chat-memory"> Erinnerungen</label>
               </div>
               <p class="hint">Gilt nur für diesen Chat und wird mit ihm gespeichert. Leere Felder nehmen den Wert aus
                 Einstellungen → Modell-Optionen oder den Standard des Modells.</p>
@@ -191,6 +191,7 @@
               <textarea id="chat-text" rows="2" placeholder="Nachricht … (Enter senden, Shift+Enter Zeilenumbruch, Esc stoppt)"></textarea>
               <button type="submit" id="chat-send" class="primary">Senden</button>
               <button type="button" id="chat-stop" disabled>Stopp</button>
+              <button type="button" id="council-skip" hidden title="Diskussion beenden und sofort die finale Antwort schreiben lassen">⏭ Finale Antwort</button>
             </form>
           </div>
         </div>
@@ -205,6 +206,8 @@
         <div class="row">
           <label>keep_alive <input id="set-keepalive" autocomplete="off" placeholder="5m"></label>
           <label>Timeout (s) <input type="number" id="set-timeout" min="10"></label>
+          <label title="Wie viele Aufträge (Chat-Antwort, Council-Lauf, Speed-Test, Einlesen) gleichzeitig an Ollama gehen. Weitere warten in der Reihe.">
+            Gleichzeitige Aufträge <input type="number" id="set-parallel" min="1" max="8"></label>
         </div>
         <label>Modell-Optionen (JSON, gilt für alle Modi)
           <textarea id="set-options" rows="3" placeholder='{"temperature": 0.7, "num_ctx": 8192}'></textarea>
@@ -225,7 +228,7 @@
       </div>
       <div class="panel">
         <strong>Wissensbasen (RAG)</strong>
-        <p class="hint">Dokumente (PDF, Text, Markdown …) einmal einlesen und im Chat unter „System-Prompt &amp;
+        <p class="hint">Dokumente (PDF, Text, Markdown, ZIP-Dateien mit Quelltext …) einmal einlesen und im Chat unter „System-Prompt &amp;
           Einstellungen“ als Wissensbasis wählen. Zu jeder Frage werden dann die passendsten Ausschnitte mitgeschickt
           und unter der Antwort als Quellen angezeigt.</p>
         <div class="row">
@@ -238,6 +241,35 @@
           <button id="rag-create" type="button">Anlegen</button>
         </div>
         <span id="rag-msg" class="hint"></span>
+      </div>
+      <div class="panel">
+        <strong>Erinnerungen</strong>
+        <p class="hint">Fakten über dich, die Chat und Council kennen sollen (z. B. „Nutzt Arch Linux“, „mag kurze
+          Antworten“). Nur du siehst sie. Das Modell schlägt neue vor, wenn du es bittest, sich etwas zu merken;
+          gespeichert wird erst, wenn du auf „Merken“ klickst. Pro Chat abschaltbar unter „System-Prompt &amp; Einstellungen“.</p>
+        <label class="check"><input type="checkbox" id="mem-enabled"> Erinnerungen verwenden</label>
+        <p id="mem-state" class="hint"></p>
+        <div id="mem-list" class="rag-list"></div>
+        <form id="mem-form" class="row">
+          <label>Neue Erinnerung <input id="mem-text" maxlength="300" autocomplete="off" placeholder="z. B. Ich nutze Arch Linux"></label>
+          <button type="submit">Hinzufügen</button>
+        </form>
+        <span id="mem-msg" class="hint"></span>
+      </div>
+      <div class="panel" data-admin>
+        <strong>Code (Sandbox)</strong>
+        <p class="hint">Im Code-Modus schreibt das Modell Python-Code, den man im Chat mit „▶ Ausführen“ startet: in einem
+          Docker-Container ohne Netzwerk, mit Zeit- und Speicherlimit, schreibgeschütztem System und einem Arbeitsordner,
+          der danach gelöscht ist. Einrichtung und Risiken: README, Abschnitt „Code-Modus“.</p>
+        <p id="code-state" class="hint"></p>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="code-users"> Auch normale Benutzer dürfen Code ausführen</label>
+          <label class="compact">Zeitlimit (s) <input type="number" id="code-timeout" min="5" max="600"></label>
+          <label class="compact">Speicher (MB) <input type="number" id="code-memory" min="64" max="8192"></label>
+          <button id="code-check" class="ghost" type="button">Sandbox prüfen</button>
+        </div>
+        <label>Ordner, deren Quelltext Admins in Wissensbasen einlesen dürfen (einer pro Zeile)
+          <textarea id="code-roots" rows="2" placeholder="/home/fox/projekte"></textarea></label>
       </div>
       <div class="panel" data-admin>
         <strong>Websuche (optional, für alle)</strong>
@@ -264,6 +296,7 @@
           <button id="pw-set" type="button">Passwort ändern</button>
           <span id="pw-msg" class="hint"></span>
         </div>
+        <p id="storage-state" class="hint"></p>
         <p class="hint">Danach musst du dich auf deinen anderen Geräten neu anmelden. Passwort vergessen? Ein Admin kann
           es unter „Benutzer“ neu setzen, oder auf dem Server <code>.venv/bin/python -m app --set-password --user NAME</code>.</p>
       </div>
@@ -272,6 +305,11 @@
         <p class="hint">Jedes Konto hat eigene Chats, Wissensbasen und Einstellungen. Admins können zusätzlich Ollama,
           Websuche und Speed-Test einstellen, Modelle entladen und Konten verwalten.</p>
         <div id="users-list" class="rag-list"></div>
+        <div class="row">
+          <label class="compact">Speicher pro Benutzer (MB) <input type="number" id="limit-user" min="0"></label>
+          <label class="compact">Speicher gesamt (MB) <input type="number" id="limit-total" min="0"></label>
+        </div>
+        <p class="hint">Zählt Anhänge, Wissensbasen und Chats. 0 = keine Grenze.</p>
         <form id="user-form" class="row">
           <label>Neuer Benutzer <input id="user-name" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="z. B. anna"></label>
           <label>Passwort <input type="password" id="user-password" autocomplete="new-password"></label>
@@ -311,6 +349,9 @@
   <script src="attachments.js"></script>
   <script src="context.js"></script>
   <script src="chat-tools.js"></script>
+  <script src="council.js"></script>
+  <script src="memory.js"></script>
+  <script src="code.js"></script>
   <script src="rag.js"></script>
   <script src="app.js"></script>
 </body>

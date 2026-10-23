@@ -51,6 +51,8 @@ function renderChatSettings(chat) {
   $('chat-think').value = chat.think == null ? '' : String(chat.think);
   $('chat-tools').checked = !!chat.tools;
   $('chat-web').checked = !!chat.web;
+  $('chat-memory').checked = chat.memory !== false;
+  $('chat-code').checked = !!chat.code;
   renderKnowledgeSelect();
   $('chat-settings-msg').textContent = '';
   renderPresets();
@@ -70,6 +72,8 @@ function summarizeSettings(chat) {
   if (kb) parts.push(`Wissen „${kb.name}“`);
   if (chat.tools) parts.push('Werkzeuge');
   if (chat.web) parts.push('Websuche');
+  if (chat.memory === false) parts.push('ohne Erinnerungen');
+  if (chat.code) parts.push('Code-Modus');
   $('chat-settings-sum').textContent = parts.length ? `(${parts.join(', ')})` : '';
 }
 
@@ -81,6 +85,14 @@ function settingsChanged() {
   chat.knowledge = $('chat-knowledge').value || null;
   chat.tools = $('chat-tools').checked;
   chat.web = $('chat-web').checked;
+  chat.memory = $('chat-memory').checked;
+  if (chat.code !== $('chat-code').checked) {
+    chat.code = $('chat-code').checked;
+    if (chat.code && codeState.model && !$('chat-model').value.includes('coder')) {
+      setChatStatus(`Tipp: Ein Code-Modell schreibt besseren Code, z. B. ${codeState.model} (ollama pull ${codeState.model}).`);
+    }
+    renderChatLog();  // run buttons on or off
+  }
   syncPresetSelect();
   summarizeSettings(chat);
   scheduleContextMeter();
@@ -162,7 +174,7 @@ $('chat-save').addEventListener('click', (e) => flash(e.target, async () => {
   const c = chatState.current;
   const defaults = {
     model: $('chat-model').value, system: c.system || '', options: c.options || {}, think: c.think ?? null,
-    knowledge: c.knowledge || null, tools: !!c.tools, web: !!c.web,
+    knowledge: c.knowledge || null, tools: !!c.tools, web: !!c.web, memory: c.memory !== false, code: !!c.code,
   };
   await api('/api/config', { method: 'PUT', body: { chat: defaults } });
   Object.assign(state.config.chat, defaults);
@@ -170,4 +182,6 @@ $('chat-save').addEventListener('click', (e) => flash(e.target, async () => {
 
 buildGenInputs();
 $('chat-system').addEventListener('input', settingsChanged);
-for (const id of ['chat-think', 'chat-knowledge', 'chat-tools', 'chat-web']) $(id).addEventListener('change', settingsChanged);
+for (const id of ['chat-think', 'chat-knowledge', 'chat-tools', 'chat-web', 'chat-memory', 'chat-code']) {
+  $(id).addEventListener('change', settingsChanged);
+}

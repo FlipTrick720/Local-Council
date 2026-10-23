@@ -81,6 +81,33 @@ $('pw-set').addEventListener('click', async () => {
   }
 });
 
+function megabytes(bytes) {
+  return `${(bytes / 2 ** 20).toFixed(bytes < 10 * 2 ** 20 ? 1 : 0)} MB`;
+}
+
+async function renderStorage() {
+  try {
+    const s = await api('/api/storage');
+    $('storage-state').textContent = `Dein Speicher: ${megabytes(s.used)}${s.limit ? ` von ${megabytes(s.limit)}` : ''} belegt`
+      + (state.user.admin ? ` · App gesamt: ${megabytes(s.total_used)}${s.total_limit ? ` von ${megabytes(s.total_limit)}` : ''}` : '');
+  } catch { /* shown again on the next visit of the settings */ }
+}
+
+// Called from app.js once the config is loaded.
+function initAccount() {
+  renderStorage();
+  if (!state.user.admin) return;
+  const parseMb = (v) => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0) throw new Error('ganze Zahl ab 0');
+    return n;
+  };
+  $('limit-user').value = state.config.limits.user_mb;
+  $('limit-total').value = state.config.limits.total_mb;
+  autosave($('limit-user'), 'limits', 'user_mb', { parse: parseMb });
+  autosave($('limit-total'), 'limits', 'total_mb', { parse: parseMb });
+}
+
 // ---------- Benutzer (admins only) ----------
 
 async function loadUsers() {
@@ -97,7 +124,8 @@ function renderUsers(list) {
   for (const u of list) {
     const row = el('div', 'rag-head');
     const me = u.name === state.user.name;
-    const details = [u.admin ? 'Admin' : 'Benutzer', !u.has_password && 'ohne Passwort', me && 'du'].filter(Boolean);
+    const details = [u.admin ? 'Admin' : 'Benutzer', !u.has_password && 'ohne Passwort', me && 'du', megabytes(u.used)]
+      .filter(Boolean);
     row.append(el('strong', null, u.name), el('span', 'hint', details.join(' · ')));
     if (!me) {
       row.append(
@@ -158,4 +186,10 @@ $('user-form').addEventListener('submit', async (e) => {
     msg.textContent = `Fehler: ${err.message}`;
   }
   loadUsers();
+});
+
+// Usage changes with every upload; refresh it when the settings are opened.
+document.querySelector('nav button[data-tab="settings"]').addEventListener('click', () => {
+  renderStorage();
+  if (state.user.admin) loadUsers();
 });
