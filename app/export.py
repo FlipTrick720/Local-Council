@@ -43,11 +43,11 @@ def to_markdown(chat: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def all_as_zip() -> bytes:
+def all_as_zip(user: str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
-        for summary in chats.list_all():
-            chat = chats.get(summary["id"])
+        for summary in chats.list_all(user):
+            chat = chats.get(user, summary["id"])
             base = filename(chat, "")[:-1] + f"-{chat['id'][-6:]}"
             z.writestr(f"markdown/{base}.md", to_markdown(chat))
             z.writestr(f"json/{base}.json", to_json(chat))

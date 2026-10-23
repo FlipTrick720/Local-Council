@@ -1,4 +1,4 @@
-"""Chat conversations, stored as one JSON file per chat in data/chats/<id>.json.
+"""Chat conversations, stored as one JSON file per chat in data/chats/<user>/<id>.json.
 
 A chat looks like {"id", "title", "model", "created", "updated", "messages": [...]}. Each message has at least
 "role" and "content"; user messages may have "attachments" (upload metadata, see app.uploads), assistant
@@ -27,10 +27,14 @@ def valid_id(chat_id: str) -> bool:
     return bool(ID_RE.match(chat_id))
 
 
-def _path(chat_id: str):
+def _dir(user: str):
+    return DATA_DIR / user
+
+
+def _path(user: str, chat_id: str):
     if not valid_id(chat_id):
         raise ChatNotFound(chat_id)
-    return DATA_DIR / f"{chat_id}.json"
+    return _dir(user) / f"{chat_id}.json"
 
 
 def _now() -> str:
@@ -48,10 +52,10 @@ def summary(chat: dict) -> dict:
     }
 
 
-def list_all() -> list[dict]:
-    """Summaries of all chats, most recently updated first. Broken files are skipped."""
+def list_all(user: str) -> list[dict]:
+    """Summaries of the user's chats, most recently updated first. Broken files are skipped."""
     out = []
-    for path in DATA_DIR.glob("*.json"):
+    for path in _dir(user).glob("*.json"):
         try:
             out.append(summary(json.loads(path.read_text("utf-8"))))
         except (ValueError, KeyError, OSError):
@@ -59,31 +63,31 @@ def list_all() -> list[dict]:
     return sorted(out, key=lambda c: c["updated"], reverse=True)
 
 
-def get(chat_id: str) -> dict:
-    path = _path(chat_id)
+def get(user: str, chat_id: str) -> dict:
+    path = _path(user, chat_id)
     if not path.exists():
         raise ChatNotFound(chat_id)
     return json.loads(path.read_text("utf-8"))
 
 
-def save(chat_id: str, chat: dict) -> dict:
-    path = _path(chat_id)
+def save(user: str, chat_id: str, chat: dict) -> dict:
+    path = _path(user, chat_id)
     with _lock:
         created = chat.get("created")
         if not created and path.exists():
             created = json.loads(path.read_text("utf-8")).get("created")
         chat = {**chat, "id": chat_id, "created": created or _now(), "updated": _now()}
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(chat, indent=1, ensure_ascii=False) + "\n", "utf-8")
         tmp.replace(path)
     return chat
 
 
-def patch(chat_id: str, fields: dict) -> dict:
+def patch(user: str, chat_id: str, fields: dict) -> dict:
     """Changes single fields (e.g. the title) without sending the whole chat."""
     with _lock:
-        return save(chat_id, {**get(chat_id), **fields})
+        return save(user, chat_id, {**get(user, chat_id), **fields})
 
 
 def _snippet(text: str, pos: int, length: int, width: int = 40) -> str:
@@ -92,14 +96,14 @@ def _snippet(text: str, pos: int, length: int, width: int = 40) -> str:
     return ("…" if start else "") + snippet + ("…" if end < len(text) else "")
 
 
-def search(query: str, limit: int = 50) -> list[dict]:
+def search(user: str, query: str, limit: int = 50) -> list[dict]:
     """Chats whose title, messages or attachment names contain `query` (case-insensitive), newest first.
     Each result carries up to three hits with the message index and a text snippet around the match."""
     q = query.lower().strip()
     if not q:
         return []
     results = []
-    for path in DATA_DIR.glob("*.json"):
+    for path in _dir(user).glob("*.json"):
         try:
             chat = json.loads(path.read_text("utf-8"))
         except (ValueError, OSError):
@@ -119,8 +123,8 @@ def search(query: str, limit: int = 50) -> list[dict]:
     return sorted(results, key=lambda c: c["updated"], reverse=True)[:limit]
 
 
-def delete(chat_id: str) -> None:
-    path = _path(chat_id)
+def delete(user: str, chat_id: str) -> None:
+    path = _path(user, chat_id)
     with _lock:
         if not path.exists():
             raise ChatNotFound(chat_id)
@@ -129,9 +133,9 @@ def delete(chat_id: str) -> None:
 
 
 def referenced_uploads() -> set[str]:
-    """Ids of all files attached to messages in any stored chat."""
+    """Ids of all files attached to messages in any stored chat of any user."""
     ids = set()
-    for path in DATA_DIR.glob("*.json"):
+    for path in DATA_DIR.glob("*/*.json"):
         try:
             for msg in json.loads(path.read_text("utf-8")).get("messages", []):
                 ids.update(a["id"] for a in msg.get("attachments") or [] if isinstance(a, dict) and "id" in a)

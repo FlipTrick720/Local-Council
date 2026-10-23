@@ -1,7 +1,7 @@
 """Knowledge bases for RAG: named collections of documents, split into chunks and embedded with a local Ollama
 embedding model. A chat that uses a knowledge base gets the best-matching chunks added to the question.
 
-Stored in data/rag/<collection id>/:
+Every user has their own knowledge bases. Stored in data/rag/<user>/<collection id>/:
   collection.json     {"id", "name", "embed_model", "created", "docs": [{"id", "name", "chunks", "pages"}]}
   <upload id>.json    the chunk texts with their page numbers
   <upload id>.npy     the normalized embedding vectors, one row per chunk
@@ -30,17 +30,17 @@ BATCH = 16  # chunks per embedding request
 KEYWORD_WEIGHT = 0.3  # how much exact word matches add to the embedding similarity
 
 _lock = threading.RLock()
-_cache: dict[str, tuple] = {}  # collection id → (file signature, vectors, chunks)
+_cache: dict[tuple, tuple] = {}  # (user, collection id) → (file signature, vectors, chunks)
 
 
 class RagError(ValueError):
     pass
 
 
-def _dir(cid: str):
+def _dir(user: str, cid: str):
     if not ID_RE.match(cid):
         raise RagError("Ungültige Wissensbasis.")
-    return DATA_DIR / cid
+    return DATA_DIR / user / cid
 
 
 def _write_json(path, data) -> None:
@@ -49,16 +49,20 @@ def _write_json(path, data) -> None:
     tmp.replace(path)
 
 
-def get(cid: str) -> dict:
-    path = _dir(cid) / "collection.json"
+def get(user: str, cid: str) -> dict:
+    path = _dir(user, cid) / "collection.json"
     if not path.exists():
         raise RagError("Wissensbasis nicht gefunden.")
     return json.loads(path.read_text("utf-8"))
 
 
-def list_all() -> list[dict]:
+def list_all(user: str) -> list[dict]:
+    return _collections(f"{user}/kb-*/collection.json")
+
+
+def _collections(pattern: str) -> list[dict]:
     out = []
-    for path in DATA_DIR.glob("kb-*/collection.json"):
+    for path in DATA_DIR.glob(pattern):
         try:
             out.append(json.loads(path.read_text("utf-8")))
         except (ValueError, OSError):
@@ -66,34 +70,36 @@ def list_all() -> list[dict]:
     return sorted(out, key=lambda c: c["name"].lower())
 
 
-def create(name: str, embed_model: str) -> dict:
+def create(user: str, name: str, embed_model: str) -> dict:
     cid = f"kb-{secrets.token_hex(4)}"
     collection = {"id": cid, "name": name.strip()[:80], "embed_model": embed_model, "created": time.time(), "docs": []}
-    _dir(cid).mkdir(parents=True)
-    _write_json(_dir(cid) / "collection.json", collection)
+    _dir(user, cid).mkdir(parents=True)
+    _write_json(_dir(user, cid) / "collection.json", collection)
     return collection
 
 
-def delete(cid: str) -> None:
+def delete(user: str, cid: str) -> None:
     with _lock:
-        shutil.rmtree(_dir(cid), ignore_errors=True)
-        _cache.pop(cid, None)
+        get(user, cid)
+        shutil.rmtree(_dir(user, cid), ignore_errors=True)
+        _cache.pop((user, cid), None)
 
 
-def remove_document(cid: str, upload_id: str) -> dict:
+def remove_document(user: str, cid: str, upload_id: str) -> dict:
     if not uploads.ID_RE.match(upload_id):
         raise RagError("Dokument nicht gefunden.")
     with _lock:
-        collection = get(cid)
+        collection = get(user, cid)
         collection["docs"] = [d for d in collection["docs"] if d["id"] != upload_id]
         for suffix in (".json", ".npy"):
-            (_dir(cid) / f"{upload_id}{suffix}").unlink(missing_ok=True)
-        _write_json(_dir(cid) / "collection.json", collection)
+            (_dir(user, cid) / f"{upload_id}{suffix}").unlink(missing_ok=True)
+        _write_json(_dir(user, cid) / "collection.json", collection)
         return collection
 
 
 def referenced_uploads() -> set[str]:
-    return {d["id"] for c in list_all() for d in c["docs"]}
+    """Ids of all documents in any user's knowledge bases."""
+    return {d["id"] for c in _collections("*/kb-*/collection.json") for d in c["docs"]}
 
 
 # ---------- Chunking ----------
@@ -141,9 +147,9 @@ def _normalize(vectors) -> np.ndarray:
 
 # ---------- Indexing and search ----------
 
-async def add_document(client: OllamaClient, cid: str, upload_id: str) -> AsyncIterator[dict]:
+async def add_document(client: OllamaClient, user: str, cid: str, upload_id: str) -> AsyncIterator[dict]:
     """Chunks and embeds an uploaded document. Yields progress events, then the updated collection."""
-    collection = get(cid)
+    collection = get(user, cid)
     meta = uploads.meta(upload_id)
     if meta["kind"] != "text":
         raise RagError("Nur Textdateien und PDFs können in eine Wissensbasis.")
@@ -157,8 +163,8 @@ async def add_document(client: OllamaClient, cid: str, upload_id: str) -> AsyncI
         yield {"type": "progress", "done": start + len(batch), "total": len(chunks)}
 
     with _lock:
-        collection = get(cid)
-        folder = _dir(cid)
+        collection = get(user, cid)
+        folder = _dir(user, cid)
         np.save(folder / f"{upload_id}.npy", _normalize(vectors))
         _write_json(folder / f"{upload_id}.json", chunks)
         doc = {"id": upload_id, "name": meta["name"], "chunks": len(chunks), "pages": meta.get("pages")}
@@ -167,13 +173,13 @@ async def add_document(client: OllamaClient, cid: str, upload_id: str) -> AsyncI
     yield {"type": "done", "collection": collection}
 
 
-def _load(cid: str) -> tuple[np.ndarray, list[dict]]:
+def _load(user: str, cid: str) -> tuple[np.ndarray, list[dict]]:
     """All vectors and chunks of a collection, cached until a file changes."""
-    collection = get(cid)
-    folder = _dir(cid)
+    collection = get(user, cid)
+    folder = _dir(user, cid)
     files = [folder / f"{d['id']}.npy" for d in collection["docs"]]
     signature = tuple((f.name, f.stat().st_mtime) for f in files if f.exists())
-    cached = _cache.get(cid)
+    cached = _cache.get((user, cid))
     if cached and cached[0] == signature:
         return cached[1], cached[2]
     matrices, chunks = [], []
@@ -186,13 +192,13 @@ def _load(cid: str) -> tuple[np.ndarray, list[dict]]:
         matrices.append(matrix)
         chunks += [{**c, "name": doc["name"]} for c in texts]
     vectors = np.vstack(matrices) if matrices else np.zeros((0, 1), dtype=np.float32)
-    _cache[cid] = (signature, vectors, chunks)
+    _cache[(user, cid)] = (signature, vectors, chunks)
     return vectors, chunks
 
 
-async def search(client: OllamaClient, cid: str, query: str, top_k: int = 5) -> list[dict]:
-    collection = get(cid)
-    vectors, chunks = _load(cid)
+async def search(client: OllamaClient, user: str, cid: str, query: str, top_k: int = 5) -> list[dict]:
+    collection = get(user, cid)
+    vectors, chunks = _load(user, cid)
     if not chunks:
         return []
     query_vector = _normalize(await client.embed(collection["embed_model"], [query]))[0]

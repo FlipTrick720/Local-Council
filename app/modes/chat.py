@@ -53,6 +53,7 @@ async def run(
     client: OllamaClient, model: str, messages: list[dict], system: str = "",
     options: dict | None = None, think: bool | None = None, *,
     knowledge: str | None = None, use_tools: bool = False, web: bool = False, cfg: dict | None = None,
+    user: str = "",
 ) -> AsyncIterator[dict]:
     cfg = cfg or {}
     base = {"model": model}
@@ -74,9 +75,9 @@ async def run(
 
     try:
         if knowledge and question:
-            collection = rag.get(knowledge)
+            collection = rag.get(user, knowledge)
             yield {"type": "status", **base, "text": f"Durchsuche Wissensbasis „{collection['name']}“ …"}
-            hits = await rag.search(client, knowledge, question, cfg.get("rag", {}).get("top_k", 5))
+            hits = await rag.search(client, user, knowledge, question, cfg.get("rag", {}).get("top_k", 5))
             if hits:
                 context.append(rag.context_block(collection["name"], hits))
                 sources += [{"kind": "doc", "n": n, "name": h["name"], "page": h.get("page"), "score": h["score"],

@@ -20,13 +20,13 @@ function blankChat() {
   };
 }
 
-// Which chat was open last is a per-device convenience, so it lives in the browser.
+// Which chat was open last is a per-device convenience, so it lives in the browser (per account).
 function rememberChat(id) {
-  try { localStorage.setItem(LAST_CHAT_KEY, id); } catch { /* private mode */ }
+  try { localStorage.setItem(`${LAST_CHAT_KEY}.${state.user.name}`, id); } catch { /* private mode */ }
 }
 
 function rememberedChat() {
-  try { return localStorage.getItem(LAST_CHAT_KEY); } catch { return null; }
+  try { return localStorage.getItem(`${LAST_CHAT_KEY}.${state.user.name}`); } catch { return null; }
 }
 
 function setChatStatus(text, kind = '') {

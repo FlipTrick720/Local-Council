@@ -202,7 +202,7 @@ $('speed-save').addEventListener('click', (e) => flash(e.target, () => {
     parallel: $('speed-parallel').checked,
     prompt: $('speed-prompt').value,
   });
-  return saveConfig();
+  return saveConfig('speedtest');
 }));
 
 // ---------- Council ----------
@@ -260,7 +260,7 @@ $('council-save').addEventListener('click', (e) => flash(e.target, () => {
     rounds: Number($('council-rounds').value),
     parallel: $('council-parallel').checked,
   });
-  return saveConfig();
+  return saveConfig('council');
 }));
 
 // ---------- Einstellungen ----------
@@ -287,7 +287,7 @@ $('set-save').addEventListener('click', async () => {
       timeout: parseTimeout($('set-timeout').value),
       options: parseOptions($('set-options').value),
     });
-    await saveConfig();
+    await saveConfig('ollama');
     msg.textContent = 'Gespeichert.';
     await refreshModels();
   } catch (e) {
@@ -353,13 +353,16 @@ async function loadModels() {
   }
 }
 
-document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('click', () => {
-  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b === btn));
-  document.querySelectorAll('.tab').forEach((t) => { t.hidden = t.id !== `tab-${btn.dataset.tab}`; });
-}));
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach((t) => { t.hidden = t.id !== `tab-${name}`; });
+}
+
+document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
 (async () => {
   await ensureLogin();
+  showTab(state.user.admin ? 'speed' : 'chat');  // the Speed-Test is for admins only
   state.config = await api('/api/config');
   const { speedtest, council, ollama } = state.config;
   $('speed-prompt').value = speedtest.prompt;
@@ -388,7 +391,7 @@ document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('c
   await loadModels();
   lastRefresh = Date.now();
   renderPickers(configSelection());
-  loadSpeedHistory();
+  if (state.user.admin) loadSpeedHistory();
   initRag();
   initChat();
 })();

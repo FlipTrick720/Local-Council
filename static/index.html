@@ -12,20 +12,22 @@
   <header>
     <h1>Local Council</h1>
     <nav>
-      <button data-tab="speed" class="active">Speed-Test</button>
+      <button data-tab="speed" data-admin>Speed-Test</button>
       <button data-tab="council">Council</button>
       <button data-tab="chat">Chat</button>
       <button data-tab="settings">Einstellungen</button>
     </nav>
     <span id="status" class="status" title="Verbindung zu Ollama">…</span>
     <button id="theme" class="ghost icon-btn" type="button" title="Farbschema: Auto / Hell / Dunkel"></button>
+    <span id="whoami" class="hint" hidden></span>
     <button id="logout" class="ghost" type="button" hidden>Abmelden</button>
   </header>
 
   <div id="login" class="login" hidden>
     <form id="login-form" class="panel">
       <h2>Local Council</h2>
-      <input type="text" name="username" value="local-council" autocomplete="username" hidden>
+      <label>Benutzername <input type="text" id="login-name" name="username" autocomplete="username"
+        autocapitalize="none" spellcheck="false"></label>
       <label>Passwort <input type="password" id="login-password" name="password" autocomplete="current-password"></label>
       <div class="actions">
         <button class="primary" type="submit">Anmelden</button>
@@ -36,7 +38,7 @@
 
   <main>
     <!-- Speed-Test -->
-    <section id="tab-speed" class="tab">
+    <section id="tab-speed" class="tab" hidden>
       <div class="panel">
         <label>Prompt
           <textarea id="speed-prompt" rows="3"></textarea>
@@ -197,7 +199,8 @@
 
     <!-- Einstellungen -->
     <section id="tab-settings" class="tab" hidden>
-      <div class="panel">
+      <div class="panel" data-admin>
+        <strong>Ollama (für alle)</strong>
         <label>Ollama-URL <input id="set-url" autocomplete="off" placeholder="http://127.0.0.1:11434"></label>
         <div class="row">
           <label>keep_alive <input id="set-keepalive" autocomplete="off" placeholder="5m"></label>
@@ -236,8 +239,8 @@
         </div>
         <span id="rag-msg" class="hint"></span>
       </div>
-      <div class="panel">
-        <strong>Websuche (optional)</strong>
+      <div class="panel" data-admin>
+        <strong>Websuche (optional, für alle)</strong>
         <label>SearXNG-URL <input id="web-url" autocomplete="off" placeholder="http://192.168.178.10:8888"></label>
         <div class="actions">
           <button id="web-test" type="button">Verbindung testen</button>
@@ -247,22 +250,35 @@
           mit JSON-Ausgabe (siehe README). Danach im Chat „Websuche“ anhaken.</p>
       </div>
       <div class="panel">
-        <strong>Passwort</strong>
+        <strong>Mein Konto</strong>
         <p id="pw-state" class="hint"></p>
         <form id="pw-form" class="row">
-          <!-- The app has no user names; this tells password managers which "account" the password belongs to,
-               so they do not take a nearby field (e.g. the SearXNG URL) for the user name. -->
-          <input type="text" name="username" value="local-council" autocomplete="username" hidden>
+          <!-- Tells password managers which account the password belongs to, so they do not take a nearby field
+               (e.g. the SearXNG URL) for the user name. -->
+          <input type="text" id="pw-user" name="username" autocomplete="username" hidden>
+          <label id="pw-current-label">Bisheriges Passwort <input type="password" id="pw-current" name="current-password" autocomplete="current-password"></label>
           <label>Neues Passwort <input type="password" id="pw-new" name="new-password" autocomplete="new-password"></label>
           <label>Wiederholen <input type="password" id="pw-repeat" name="repeat-password" autocomplete="new-password"></label>
         </form>
         <div class="actions">
-          <button id="pw-set" type="button">Passwort setzen</button>
-          <button id="pw-remove" class="ghost" type="button" hidden>Passwortschutz entfernen</button>
+          <button id="pw-set" type="button">Passwort ändern</button>
           <span id="pw-msg" class="hint"></span>
         </div>
-        <p class="hint">Gilt für alle Geräte; nach dem Setzen müssen sich alle anderen neu anmelden. Passwort vergessen?
-          Auf dem Server <code>.venv/bin/python -m app --remove-password</code> ausführen.</p>
+        <p class="hint">Danach musst du dich auf deinen anderen Geräten neu anmelden. Passwort vergessen? Ein Admin kann
+          es unter „Benutzer“ neu setzen, oder auf dem Server <code>.venv/bin/python -m app --set-password --user NAME</code>.</p>
+      </div>
+      <div class="panel" data-admin>
+        <strong>Benutzer</strong>
+        <p class="hint">Jedes Konto hat eigene Chats, Wissensbasen und Einstellungen. Admins können zusätzlich Ollama,
+          Websuche und Speed-Test einstellen, Modelle entladen und Konten verwalten.</p>
+        <div id="users-list" class="rag-list"></div>
+        <form id="user-form" class="row">
+          <label>Neuer Benutzer <input id="user-name" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="z. B. anna"></label>
+          <label>Passwort <input type="password" id="user-password" autocomplete="new-password"></label>
+          <label class="check"><input type="checkbox" id="user-admin"> Admin</label>
+          <button id="user-create" type="submit">Anlegen</button>
+        </form>
+        <span id="users-msg" class="hint"></span>
       </div>
       <div class="panel">
         <div class="row">

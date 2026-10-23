@@ -59,7 +59,6 @@
     "num_ctx": 16384
   },
   "auth": {
-    "password_hash": "",
     "secret": ""
   }
 }

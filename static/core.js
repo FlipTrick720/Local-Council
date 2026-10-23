@@ -3,7 +3,7 @@
 // Shared helpers for all tabs: API access, NDJSON streaming, small DOM helpers, autosave.
 
 const $ = (id) => document.getElementById(id);
-const state = { config: null, models: [] };
+const state = { config: null, models: [], user: null };
 
 // ---------- API ----------
 
@@ -45,8 +45,10 @@ async function stream(path, body, onEvent, signal) {
   }
 }
 
-async function saveConfig() {
-  state.config = await api('/api/config', { method: 'PUT', body: state.config });
+// Sends only the given sections: chat, council and rag are the user's own, the others need an admin.
+async function saveConfig(...sections) {
+  const body = Object.fromEntries(sections.map((s) => [s, state.config[s]]));
+  state.config = await api('/api/config', { method: 'PUT', body });
 }
 
 // ---------- UI helpers ----------

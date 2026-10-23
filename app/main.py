@@ -1,15 +1,15 @@
 """FastAPI app: JSON/NDJSON API under /api, static frontend under /."""
 import asyncio
 import json
-from typing import AsyncIterator, Literal
+from typing import Annotated, AsyncIterator, Literal
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import auth, chats, config, export, history, rag, titles, uploads, websearch
+from app import auth, chats, config, export, history, rag, titles, uploads, users, websearch
 from app.config import ROOT
 from app.modes import chat, council, speedtest
 from app.ollama import OllamaClient, OllamaError
@@ -40,12 +40,35 @@ async def guard(request: Request, call_next):
         return JSONResponse({"detail": "Host nicht erlaubt. In config.json unter server.allowed_hosts eintragen."},
                             status_code=400)
     if request.url.path.startswith("/api/") and request.url.path not in OPEN_PATHS:
-        if auth.enabled(cfg) and not auth.valid_token(cfg, request.cookies.get(auth.COOKIE)):
+        user = users.open_user() or users.from_token(request.cookies.get(auth.COOKIE))
+        if not user:
             return JSONResponse({"detail": "Anmeldung erforderlich."}, status_code=401)
+        request.state.user = user
     response = await call_next(request)
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
+    # Without this, browsers keep using cached JS for hours after an update (unchanged files still get a cheap 304).
+    response.headers.setdefault("Cache-Control", "no-cache")
     return response
+
+
+def current_user(request: Request) -> str:
+    return request.state.user
+
+
+def is_admin(user: str) -> bool:
+    return bool((users.get(user) or {}).get("admin"))
+
+
+def require_admin(request: Request) -> str:
+    if not is_admin(request.state.user):
+        raise HTTPException(403, "Das darf nur ein Admin.")
+    return request.state.user
+
+
+User = Annotated[str, Depends(current_user)]
+AdminUser = Annotated[str, Depends(require_admin)]
+ADMIN = [Depends(require_admin)]
 
 
 class SpeedtestRequest(BaseModel):
@@ -109,48 +132,64 @@ def public_config(cfg: dict) -> dict:
 
 
 @app.get("/api/config")
-def get_config():
-    return public_config(config.load())
+def get_config(user: User):
+    """The user's view of the config: their own sections (users.USER_SECTIONS) on top of config.json."""
+    return public_config(users.config_for(user))
 
 
 @app.put("/api/config")
-def put_config(cfg: dict):
-    cfg.pop("auth", None)  # the password is only changed via /api/auth/password
-    return public_config(config.update(cfg))
+def put_config(cfg: dict, user: User):
+    """The user's own sections are stored for them; all other sections are the server's and need an admin."""
+    cfg.pop("auth", None)  # passwords are only changed via /api/auth/password and /api/users
+    own = {section: cfg.pop(section) for section in users.USER_SECTIONS if section in cfg}
+    if cfg:
+        if not is_admin(user):
+            raise HTTPException(403, "Server-Einstellungen kann nur ein Admin ändern.")
+        config.update(cfg)
+    if own:
+        users.update_settings(user, own)
+    return public_config(users.config_for(user))
 
 
-# ---------- Login (optional) ----------
+# ---------- Login and accounts ----------
 
 class LoginRequest(BaseModel):
+    username: str = ""
+    password: str
+
+
+class PasswordRequest(BaseModel):
+    current: str = ""
     password: str
 
 
 @app.get("/api/auth")
 def get_auth(request: Request):
-    cfg = config.load()
-    on = auth.enabled(cfg)
-    return {"enabled": on, "logged_in": not on or auth.valid_token(cfg, request.cookies.get(auth.COOKIE))}
+    """Who is logged in. "open": there is only one account and it has no password, so no login is needed."""
+    open_user = users.open_user()
+    name = open_user or users.from_token(request.cookies.get(auth.COOKIE))
+    return {"logged_in": bool(name), "open": bool(open_user), "user": users.get(name) if name else None}
 
 
-def _with_cookie(response: Response, cfg: dict) -> Response:
-    response.set_cookie(auth.COOKIE, auth.make_token(cfg), max_age=auth.MAX_AGE, httponly=True, samesite="lax")
+def _with_cookie(response: Response, user: str) -> Response:
+    response.set_cookie(auth.COOKIE, users.make_token(user), max_age=auth.MAX_AGE, httponly=True, samesite="lax")
     return response
 
 
 @app.post("/api/login")
 async def login(req: LoginRequest, request: Request):
-    cfg = config.load()
-    if not auth.enabled(cfg):
+    if users.open_user():
         return {"ok": True}
     client = request.client.host if request.client else "?"
     if auth.login_blocked(client):
         raise HTTPException(429, "Zu viele falsche Versuche. Bitte in 15 Minuten wieder versuchen.")
-    if not auth.check_password(cfg, req.password):
+    name = req.username.strip().lower()
+    if not users.check_password(name, req.password):
         auth.record_failure(client)
         await asyncio.sleep(1)  # slows down guessing
-        raise HTTPException(401, "Falsches Passwort.")
+        raise HTTPException(401, "Benutzername oder Passwort falsch.")
     auth.reset_failures(client)
-    return _with_cookie(JSONResponse({"ok": True}), cfg)
+    return _with_cookie(JSONResponse({"ok": True}), name)
 
 
 @app.post("/api/logout")
@@ -161,12 +200,64 @@ def logout():
 
 
 @app.put("/api/auth/password")
-def put_password(req: LoginRequest):
-    """Sets a new password (logs out all other devices) or removes it with an empty string."""
-    auth.set_password(req.password)
-    cfg = config.load()
-    response = JSONResponse({"enabled": auth.enabled(cfg)})
-    return _with_cookie(response, cfg) if auth.enabled(cfg) else response
+def put_password(req: PasswordRequest, user: User):
+    """Changes the user's own password (logs them out on their other devices). Only the single account of an
+    open app may also remove it again (empty password)."""
+    me = users.get(user)
+    if me["has_password"] and not users.check_password(user, req.current):
+        raise HTTPException(400, "Das bisherige Passwort stimmt nicht.")
+    if not req.password and len(users.list_all()) > 1:
+        raise HTTPException(400, "Bitte ein Passwort eingeben.")
+    me = users.update(user, password=req.password)
+    response = JSONResponse({"user": me})
+    return _with_cookie(response, user) if me["has_password"] else response
+
+
+class NewUserRequest(BaseModel):
+    name: str
+    password: str
+    admin: bool = False
+
+
+class UserChange(BaseModel):
+    password: str | None = None
+    admin: bool | None = None
+
+
+def _users_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except users.UserError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/users", dependencies=ADMIN)
+def list_users():
+    return users.list_all()
+
+
+@app.post("/api/users", dependencies=ADMIN)
+def create_user(req: NewUserRequest):
+    if users.open_user():
+        raise HTTPException(400, "Bitte zuerst unter „Mein Konto“ ein eigenes Passwort setzen, sonst kannst du dich "
+                                 "danach nicht mehr anmelden.")
+    return _users_call(users.create, req.name, req.password, req.admin)
+
+
+@app.patch("/api/users/{name}", dependencies=ADMIN)
+def change_user(name: str, req: UserChange):
+    if req.password == "":
+        raise HTTPException(400, "Bitte ein Passwort eingeben.")
+    return _users_call(users.update, name, password=req.password, admin=req.admin)
+
+
+@app.delete("/api/users/{name}")
+def delete_user(name: str, admin: AdminUser):
+    if name == admin:
+        raise HTTPException(400, "Das eigene Konto kann man nicht löschen.")
+    _users_call(users.delete, name)
+    uploads.collect_garbage(chats.referenced_uploads() | rag.referenced_uploads())
+    return {"deleted": name}
 
 
 @app.get("/api/models")
@@ -190,7 +281,7 @@ async def load_model(req: ModelRequest):
     return await _set_loaded(req.model, True)
 
 
-@app.post("/api/models/unload")
+@app.post("/api/models/unload", dependencies=ADMIN)
 async def unload_model(req: ModelRequest):
     return await _set_loaded(req.model, False)
 
@@ -212,7 +303,7 @@ async def show_model(req: ModelRequest):
         raise HTTPException(502, str(e))
 
 
-@app.post("/api/speedtest")
+@app.post("/api/speedtest", dependencies=ADMIN)
 def post_speedtest(req: SpeedtestRequest):
     cfg = config.load()
     models = _unique(req.models if req.models is not None else cfg["speedtest"]["models"])
@@ -222,7 +313,7 @@ def post_speedtest(req: SpeedtestRequest):
     return ndjson(speedtest.run(OllamaClient.from_config(cfg), models, req.prompt, parallel, req.record))
 
 
-@app.get("/api/speedtest/history")
+@app.get("/api/speedtest/history", dependencies=ADMIN)
 def get_speedtest_history():
     return history.load_all()
 
@@ -231,14 +322,14 @@ class PruneRequest(BaseModel):
     keep: int = Field(default=3, ge=0)
 
 
-@app.post("/api/speedtest/history/prune")
+@app.post("/api/speedtest/history/prune", dependencies=ADMIN)
 def prune_speedtest_history(req: PruneRequest):
     return {"removed": history.prune(req.keep)}
 
 
 @app.post("/api/council")
-def post_council(req: CouncilRequest):
-    cfg = config.load()
+def post_council(req: CouncilRequest, user: User):
+    cfg = users.config_for(user)
     c = cfg["council"]
     members = _unique(req.members if req.members is not None else c["members"])
     if len(members) < 2:
@@ -250,15 +341,15 @@ def post_council(req: CouncilRequest):
 
 
 @app.post("/api/chat")
-def post_chat(req: ChatRequest):
-    cfg = config.load()
+def post_chat(req: ChatRequest, user: User):
+    cfg = users.config_for(user)
     model = req.model or cfg["chat"]["model"]
     if not model:
         raise HTTPException(400, "Kein Chat-Modell ausgewählt.")
     system = req.system if req.system is not None else cfg["chat"]["system"]
     messages = [uploads.expand(m.model_dump()) for m in req.messages]
     return ndjson(chat.run(OllamaClient.from_config(cfg), model, messages, system, req.options, req.think,
-                           knowledge=req.knowledge, use_tools=req.tools, web=req.web, cfg=cfg))
+                           knowledge=req.knowledge, use_tools=req.tools, web=req.web, cfg=cfg, user=user))
 
 
 class ChatDoc(BaseModel, extra="allow"):
@@ -269,18 +360,18 @@ class ChatDoc(BaseModel, extra="allow"):
 
 
 @app.get("/api/chats")
-def list_chats():
-    return chats.list_all()
+def list_chats(user: User):
+    return chats.list_all(user)
 
 
 @app.get("/api/chats/search")
-def search_chats(q: str = ""):
-    return chats.search(q)
+def search_chats(user: User, q: str = ""):
+    return chats.search(user, q)
 
 
 @app.get("/api/chats/export")
-def export_all_chats():
-    return Response(export.all_as_zip(), media_type="application/zip",
+def export_all_chats(user: User):
+    return Response(export.all_as_zip(user), media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="local-council-chats.zip"'})
 
 
@@ -291,8 +382,8 @@ class TitleRequest(BaseModel):
 
 
 @app.post("/api/chats/title")
-async def make_title(req: TitleRequest):
-    cfg = config.load()
+async def make_title(req: TitleRequest, user: User):
+    cfg = users.config_for(user)
     model = cfg["chat"].get("title_model") or req.model
     if not model:
         raise HTTPException(400, "Kein Modell für den Titel.")
@@ -303,32 +394,32 @@ async def make_title(req: TitleRequest):
 
 
 @app.get("/api/chats/{chat_id}")
-def get_chat(chat_id: str):
+def get_chat(chat_id: str, user: User):
     try:
-        return chats.get(chat_id)
+        return chats.get(user, chat_id)
     except chats.ChatNotFound:
         raise HTTPException(404, "Chat nicht gefunden.")
 
 
 @app.put("/api/chats/{chat_id}")
-def put_chat(chat_id: str, chat: ChatDoc):
+def put_chat(chat_id: str, chat: ChatDoc, user: User):
     if not chats.valid_id(chat_id):
         raise HTTPException(400, "Ungültige Chat-ID.")
-    return chats.save(chat_id, chat.model_dump())
+    return chats.save(user, chat_id, chat.model_dump())
 
 
 @app.patch("/api/chats/{chat_id}")
-def patch_chat(chat_id: str, fields: dict):
+def patch_chat(chat_id: str, fields: dict, user: User):
     try:
-        return chats.summary(chats.patch(chat_id, fields))
+        return chats.summary(chats.patch(user, chat_id, fields))
     except chats.ChatNotFound:
         raise HTTPException(404, "Chat nicht gefunden.")
 
 
 @app.get("/api/chats/{chat_id}/export")
-def export_chat(chat_id: str, format: Literal["md", "json"] = "md"):
+def export_chat(chat_id: str, user: User, format: Literal["md", "json"] = "md"):
     try:
-        chat = chats.get(chat_id)
+        chat = chats.get(user, chat_id)
     except chats.ChatNotFound:
         raise HTTPException(404, "Chat nicht gefunden.")
     body = export.to_markdown(chat) if format == "md" else export.to_json(chat)
@@ -339,9 +430,9 @@ def export_chat(chat_id: str, format: Literal["md", "json"] = "md"):
 
 
 @app.delete("/api/chats/{chat_id}")
-def delete_chat(chat_id: str):
+def delete_chat(chat_id: str, user: User):
     try:
-        chats.delete(chat_id)
+        chats.delete(user, chat_id)
     except chats.ChatNotFound:
         raise HTTPException(404, "Chat nicht gefunden.")
     return {"deleted": chat_id}
@@ -392,30 +483,30 @@ def _rag_call(fn, *args):
 
 
 @app.get("/api/rag")
-def list_collections():
-    return rag.list_all()
+def list_collections(user: User):
+    return rag.list_all(user)
 
 
 @app.post("/api/rag")
-def create_collection(req: CollectionRequest):
-    return rag.create(req.name, config.load()["rag"]["embed_model"])
+def create_collection(req: CollectionRequest, user: User):
+    return rag.create(user, req.name, users.config_for(user)["rag"]["embed_model"])
 
 
 @app.delete("/api/rag/{cid}")
-def delete_collection(cid: str):
-    _rag_call(rag.delete, cid)
+def delete_collection(cid: str, user: User):
+    _rag_call(rag.delete, user, cid)
     return {"deleted": cid}
 
 
 @app.post("/api/rag/{cid}/documents")
-def add_document(cid: str, req: DocumentRequest):
+def add_document(cid: str, req: DocumentRequest, user: User):
     """Indexes an uploaded file; streams {"type": "progress", "done", "total"} and finally the collection."""
-    _rag_call(rag.get, cid)
+    _rag_call(rag.get, user, cid)
     client = OllamaClient.from_config(config.load())
 
     async def events():
         try:
-            async for event in rag.add_document(client, cid, req.upload_id):
+            async for event in rag.add_document(client, user, cid, req.upload_id):
                 yield event
         except (rag.RagError, uploads.UploadError, OllamaError) as e:
             yield {"type": "error", "error": str(e)}
@@ -424,11 +515,11 @@ def add_document(cid: str, req: DocumentRequest):
 
 
 @app.delete("/api/rag/{cid}/documents/{upload_id}")
-def remove_document(cid: str, upload_id: str):
-    return _rag_call(rag.remove_document, cid, upload_id)
+def remove_document(cid: str, upload_id: str, user: User):
+    return _rag_call(rag.remove_document, user, cid, upload_id)
 
 
-@app.post("/api/web/test")
+@app.post("/api/web/test", dependencies=ADMIN)
 async def test_web():
     w = config.load()["web"]
     try:

@@ -52,7 +52,7 @@ function renderChatMemory() {
     : entry ? `Im Speicher: ${memoryText(entry)}`
     : 'Nicht im Speicher, wird bei der ersten Nachricht geladen';
   $('chat-load').hidden = !model || !!entry || loadedModels == null;
-  $('chat-unload').hidden = !entry;
+  $('chat-unload').hidden = !entry || !state.user.admin;  // unloading affects everyone
 }
 
 function renderLoadedList() {
@@ -62,10 +62,13 @@ function renderLoadedList() {
   if (!loadedModels.length) return list.append(el('span', 'hint', 'Kein Modell geladen.'));
   for (const m of loadedModels) {
     const row = el('div', 'loaded-row');
-    const unload = el('button', 'ghost', 'Entladen');
-    unload.type = 'button';
-    unload.addEventListener('click', () => setLoaded(m.name, false, unload, $('set-loaded-msg')));
-    row.append(el('strong', null, m.name), el('span', 'hint', memoryText(m)), unload);
+    row.append(el('strong', null, m.name), el('span', 'hint', memoryText(m)));
+    if (state.user.admin) {
+      const unload = el('button', 'ghost', 'Entladen');
+      unload.type = 'button';
+      unload.addEventListener('click', () => setLoaded(m.name, false, unload, $('set-loaded-msg')));
+      row.append(unload);
+    }
     list.append(row);
   }
 }

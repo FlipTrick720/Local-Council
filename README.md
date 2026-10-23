@@ -100,7 +100,7 @@ sudo systemctl daemon-reload
 
 ## Chat
 
-- **Gespeicherte Chats:** Jede Unterhaltung liegt als JSON-Datei in `data/chats/<id>.json` (nicht im Git) und ist
+- **Gespeicherte Chats:** Jede Unterhaltung liegt als JSON-Datei in `data/chats/<benutzer>/<id>.json` (nicht im Git) und ist
   von jedem Gerät im Heimnetz aus erreichbar. Die Liste links zeigt alle Chats, der zuletzt geöffnete wird nach F5
   wieder geöffnet. Ein Chat wird mit der ersten Nachricht gespeichert und bekommt deren Anfang als Titel.
 - **Titel:** Nach der ersten Antwort schreibt ein Modell einen kurzen Titel (abschaltbar unter Einstellungen →
@@ -174,7 +174,7 @@ unter der Antwort stehen die Quellen mit Datei, Seite und Ähnlichkeit.
   Wissensbasis merkt sich ihr Modell; ein anderes Modell gilt nur für neue Wissensbasen.
 - Suche: Ähnlichkeit der Embeddings plus ein Bonus für exakt vorkommende seltene Wörter (Fehlercodes, Namen,
   Artikelnummern), die Embeddings allein oft verfehlen.
-- Gespeichert in `data/rag/<id>/` (Abschnitte als JSON, Vektoren als `.npy`, dafür wird numpy gebraucht).
+- Gespeichert in `data/rag/<benutzer>/<id>/` (Abschnitte als JSON, Vektoren als `.npy`, dafür wird numpy gebraucht).
 - Embedding-Modelle tauchen in den Modell-Listen von Speed-Test, Council und Chat nicht auf, da sie nicht chatten
   können.
 
@@ -251,9 +251,12 @@ eingetragen, damit deine lokale Modellauswahl nicht im Repo landet. Fehlende Sch
   },
   "rag": { "embed_model": "bge-m3", "top_k": 5 },              // Wissensbasen
   "web": { "searxng_url": "", "max_results": 10, "num_ctx": 16384 }, // Websuche
-  "auth": { "password_hash": "", "secret": "" }                // nur über Einstellungen/CLI ändern
+  "auth": { "secret": "" }                                     // Schlüssel für die Anmelde-Cookies
 }
 ```
+
+`chat`, `council` und `rag` hat jeder Benutzer für sich (gespeichert in `data/settings/<benutzer>.json`); die Werte
+in `config.json` sind nur die Vorgaben für neue Benutzer. Alles andere gilt für alle und kann nur ein Admin ändern.
 
 **Modelle sind nirgends fest einprogrammiert.** Du kannst sie jederzeit wählen:
 
@@ -306,17 +309,30 @@ Wird der Verlauf zu voll, löscht der Button **„Verlauf kürzen“** alle ält
 letzten 3 Läufe je Modus erhalten (3 × nacheinander, 3 × gleichzeitig). Zum kompletten Zurücksetzen einfach die
 CSV-Dateien löschen.
 
-## Sicherheit im Heimnetz und Passwort
+## Benutzer, Anmeldung und Sicherheit
 
-Ohne Passwort kann jeder im Netz, der den Port erreicht, die App benutzen, alle Chats lesen und die Konfiguration
-ändern. Optional lässt sich ein **Passwort** setzen:
+Mehrere Personen können die App gleichzeitig benutzen, jede mit **eigenem Konto**:
 
-- unter **Einstellungen → Passwort**, oder auf dem Server mit `.venv/bin/python -m app --set-password`.
-- Danach fragt jedes Gerät einmal nach dem Passwort und bleibt 30 Tage angemeldet („Abmelden“ oben rechts).
-  Ein neues Passwort meldet alle anderen Geräte ab. Alle `/api/…`-Adressen verlangen dann die Anmeldung.
+- **Eigene Daten:** Chats (`data/chats/<benutzer>/`), Wissensbasen (`data/rag/<benutzer>/`) und Einstellungen
+  (Chat-Vorgaben, System-Prompt-Vorlagen, Council, Embedding-Modell; `data/settings/<benutzer>.json`). Niemand
+  sieht die Chats oder Wissensbasen der anderen, auch Admins nicht.
+- **Admins** stellen zusätzlich Ollama und die Websuche ein, benutzen den Speed-Test, entladen Modelle und legen
+  unter **Einstellungen → Benutzer** Konten an, setzen Passwörter neu, vergeben Admin-Rechte oder löschen Konten
+  (mit allen Daten). Mindestens ein Admin bleibt immer.
+- **Anmelden** mit Benutzername und Passwort; jedes Gerät bleibt 30 Tage angemeldet („Abmelden“ oben rechts).
+  Ein neues Passwort meldet diesen Benutzer auf allen anderen Geräten ab.
+- **Umstieg von früher:** Beim ersten Start wird die alte Installation zum Konto `admin` mit dem bisherigen
+  Passwort; alle vorhandenen Chats und Wissensbasen gehören dann `admin`.
+- **Ohne Passwort:** Solange es nur ein Konto ohne Passwort gibt, ist die App offen (wie früher ohne Passwort).
+  Weitere Benutzer lassen sich erst anlegen, wenn dieses Konto ein Passwort hat.
 - Nach 10 falschen Versuchen von einer Adresse werden Anmeldungen von dort 15 Minuten lang abgelehnt.
-- Gespeichert wird nur ein Hash (PBKDF2) in `config.json` unter `auth`; die API gibt ihn nie heraus.
-- Passwort vergessen: `.venv/bin/python -m app --remove-password`.
+- Gespeichert wird nur ein Hash (PBKDF2) in `data/users.json`; die API gibt ihn nie heraus.
+- Passwort vergessen oder ausgesperrt: auf dem Server `.venv/bin/python -m app --set-password --user NAME`
+  (ein unbekannter Name wird als neuer Admin angelegt); `--list-users` zeigt die Konten.
+
+**Gleichzeitig arbeiten:** Wie viele Anfragen Ollama wirklich parallel beantwortet, bestimmen
+`OLLAMA_NUM_PARALLEL` (Anfragen pro Modell) und `OLLAMA_MAX_LOADED_MODELS`. Alles darüber wartet in Ollamas
+Warteschlange. Fragen mehrere Personen verschiedene große Modelle an, lädt Ollama sie abwechselnd, das kostet Zeit.
 
 Weitere Schutzmaßnahmen, die immer aktiv sind:
 
@@ -341,8 +357,9 @@ Tailscale) nutzen.
 
 ## Bekannte Einschränkungen
 
-- **Kein HTTPS, keine Benutzerkonten:** Ein gemeinsames Passwort für alle; wer angemeldet ist, sieht alle Chats.
-  Passwort und Cookie gehen im Heimnetz unverschlüsselt über die Leitung.
+- **Kein HTTPS:** Passwort und Cookie gehen im Heimnetz unverschlüsselt über die Leitung.
+- **Anhänge** liegen für alle gemeinsam in `data/uploads/`, adressiert über einen Hash ihres Inhalts. Abrufen kann
+  eine Datei nur, wer ihre ID kennt, praktisch also nur, wer die Datei selbst hat.
 - **Chats speichert der Browser:** Wird ein Tab mitten in einer Antwort geschlossen, ist die Frage gespeichert, die
   Teilantwort nicht. Bearbeiten zwei Geräte gleichzeitig denselben Chat, gewinnt der zuletzt gespeicherte Stand.
 - **Kontext-Anzeige ist geschätzt** (≈ 3,5 Zeichen pro Token). Ohne eigene Einstellung nutzt Ollama nur 4096
@@ -383,7 +400,8 @@ Local-Council/
 │   ├── uploads.py       # Dateianhänge: speichern, Text aus PDFs ziehen, für Ollama aufbereiten
 │   ├── titles.py        # automatische Chat-Titel
 │   ├── export.py        # Export als Markdown/JSON/ZIP
-│   ├── auth.py          # optionales Passwort (Hash, signiertes Cookie)
+│   ├── auth.py          # Passwort-Hashes, signierte Cookies, Host-Prüfung
+│   ├── users.py         # Benutzerkonten, Einstellungen pro Benutzer, Umstieg vom alten Passwort
 │   ├── rag.py           # Wissensbasen: Abschnitte, Embeddings, Suche
 │   ├── tools.py         # Werkzeuge für Tool-Calling (Rechner, Datum, Web)
 │   ├── websearch.py     # SearXNG-Suche, Webseiten als Text (nur öffentliche Adressen)
@@ -398,7 +416,7 @@ Local-Council/
 │   ├── core.js          # gemeinsame Helfer: API, NDJSON-Stream, Autosave, Kopieren
 │   ├── theme-init.js    # Farbschema vor dem ersten Zeichnen setzen
 │   ├── theme.js         # Hell/Dunkel/Auto
-│   ├── auth.js          # Anmeldung, Passwort setzen
+│   ├── auth.js          # Anmeldung, eigenes Passwort, Benutzerverwaltung
 │   ├── chart.js         # kleines SVG-Liniendiagramm (keine externe Bibliothek)
 │   ├── markdown.js      # Markdown → bereinigtes HTML mit Code-Hervorhebung
 │   ├── math.js          # Formeln ($…$, $$…$$, \(…\), \[…\]) mit KaTeX
@@ -411,7 +429,7 @@ Local-Council/
 │   ├── rag.js           # Wissensbasen und Websuche (Einstellungen)
 │   ├── app.js           # Speed-Test, Council, Einstellungen, Start
 │   └── vendor/          # marked, DOMPurify, highlight.js, KaTeX (unverändert, mit Lizenz-Hinweis)
-├── data/                # Messdaten, Chats, Anhänge, Wissensbasen (rag/), nicht im Git
+├── data/                # Konten, Messdaten, Chats, Anhänge, Wissensbasen, nicht im Git
 ├── deploy/
 │   └── local-council.service  # systemd-Dienst für den Autostart
 ├── config.example.json  # Standardkonfiguration (Vorlage für config.json)
@@ -429,12 +447,12 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 |---|---|---|
 | GET | `/api/models` | installierte Ollama-Modelle |
 | GET | `/api/models/loaded` | Modelle, die Ollama gerade im Speicher hat |
-| POST | `/api/models/load`, `/api/models/unload` | `{model}` → Modell laden / sofort entladen |
+| POST | `/api/models/load`, `/api/models/unload` | `{model}` → Modell laden / sofort entladen (Entladen: Admin) |
 | POST | `/api/models/show` | `{model}` → Fähigkeiten (`vision`, `thinking`, `tools`) und maximale Kontextlänge |
-| GET / PUT | `/api/config` | Konfiguration lesen / speichern |
-| POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream |
-| GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen |
-| POST | `/api/speedtest/history/prune` | `{keep: 3}` → behält pro Modell und Modus nur die neuesten `keep` Messungen |
+| GET / PUT | `/api/config` | Konfiguration lesen / speichern (`chat`, `council`, `rag` pro Benutzer, der Rest nur Admin) |
+| POST | `/api/speedtest` | `{prompt, models?, parallel?}` → NDJSON-Stream (Admin) |
+| GET | `/api/speedtest/history` | alle gespeicherten Speed-Test-Messungen (Admin) |
+| POST | `/api/speedtest/history/prune` | `{keep: 3}` → behält pro Modell und Modus nur die neuesten `keep` Messungen (Admin) |
 | POST | `/api/council` | `{question, members?, synthesizer?, rounds?, parallel?}` → NDJSON-Stream |
 | POST | `/api/chat` | `{messages: [{role, content, attachments?}], model?, system?, options?, think?, knowledge?, tools?, web?}` → NDJSON-Stream |
 | POST | `/api/uploads?name=…` | Datei als roher Body → Metadaten mit `id` (für `attachments`) |
@@ -449,11 +467,13 @@ Ein neuer Modus braucht also nur eine Datei in `app/modes/`, eine Route in `main
 | DELETE | `/api/rag/{id}` | Wissensbasis löschen |
 | POST | `/api/rag/{id}/documents` | `{upload_id}` einlesen → NDJSON-Fortschritt |
 | DELETE | `/api/rag/{id}/documents/{upload_id}` | Dokument entfernen |
-| POST | `/api/web/test` | SearXNG-Verbindung prüfen |
-| GET / POST | `/api/auth`, `/api/login`, `/api/logout` | Anmeldestatus, anmelden, abmelden |
-| PUT | `/api/auth/password` | `{password}` setzen, leer = Passwortschutz aus |
+| POST | `/api/web/test` | SearXNG-Verbindung prüfen (Admin) |
+| GET / POST | `/api/auth`, `/api/login`, `/api/logout` | Anmeldestatus und Benutzer, `{username, password}` anmelden, abmelden |
+| PUT | `/api/auth/password` | `{current, password}` eigenes Passwort ändern |
+| GET / POST | `/api/users` | Konten auflisten / `{name, password, admin}` anlegen (Admin) |
+| PATCH / DELETE | `/api/users/{name}` | `{password?, admin?}` ändern / Konto mit allen Daten löschen (Admin) |
 
-Felder mit `?` fallen auf die Werte aus `config.json` zurück. Beispiel:
+Chats und Wissensbasen gehören immer dem angemeldeten Benutzer. Felder mit `?` fallen auf seine Einstellungen zurück. Beispiel:
 
 ```bash
 curl -N http://localhost:8080/api/speedtest -H 'Content-Type: application/json' \

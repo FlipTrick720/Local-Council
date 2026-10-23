@@ -1,7 +1,8 @@
-"""Optional password for the whole app. Off as long as config.json has no auth.password_hash.
+"""Passwords, signed session cookies, login throttling and the Host check. The accounts are in app.users.
 
-Logging in sets a signed cookie (HMAC with auth.secret) that is valid for 30 days. Setting a new password
-creates a new secret, which logs out all other devices.
+Logging in sets a signed cookie "<user>.<expires>.<signature>" (HMAC with auth.secret from config.json) that is
+valid for 30 days. The signature also covers the user's password hash, so a new password logs that user out on
+all other devices.
 """
 import hashlib
 import hmac
@@ -9,8 +10,6 @@ import ipaddress
 import secrets
 import socket
 import time
-
-from app import config
 
 COOKIE = "lc_session"
 MAX_AGE = 30 * 24 * 3600
@@ -22,25 +21,19 @@ LOCAL_SUFFIXES = ("", ".local", ".lan", ".home", ".home.arpa", ".internal", ".fr
 _failures: dict[str, list[float]] = {}
 
 
-def enabled(cfg: dict) -> bool:
-    return bool(cfg.get("auth", {}).get("password_hash"))
-
-
 def _hash(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), ITERATIONS).hex()
 
 
-def set_password(password: str) -> None:
-    """An empty password switches the protection off."""
+def make_hash(password: str) -> str:
     salt = secrets.token_hex(16)
-    stored = f"pbkdf2${salt}${_hash(password, salt)}" if password else ""
-    config.update({"auth": {"password_hash": stored, "secret": secrets.token_hex(32)}})
+    return f"pbkdf2${salt}${_hash(password, salt)}"
 
 
-def check_password(cfg: dict, password: str) -> bool:
+def check_hash(stored: str, password: str) -> bool:
     try:
-        _, salt, expected = cfg["auth"]["password_hash"].split("$")
-    except (KeyError, ValueError):
+        _, salt, expected = stored.split("$")
+    except ValueError:
         return False
     return hmac.compare_digest(_hash(password, salt), expected)
 
@@ -86,17 +79,24 @@ def host_allowed(host_header: str, cfg: dict) -> bool:
     return False
 
 
-def _sign(cfg: dict, expires: str) -> str:
-    return hmac.new(cfg["auth"]["secret"].encode(), expires.encode(), hashlib.sha256).hexdigest()
+def _sign(cfg: dict, user: str, expires: str, password_hash: str) -> str:
+    message = f"{user}.{expires}.{password_hash}".encode()
+    return hmac.new(cfg["auth"]["secret"].encode(), message, hashlib.sha256).hexdigest()
 
 
-def make_token(cfg: dict) -> str:
+def make_token(cfg: dict, user: str, password_hash: str) -> str:
     expires = str(int(time.time()) + MAX_AGE)
-    return f"{expires}.{_sign(cfg, expires)}"
+    return f"{user}.{expires}.{_sign(cfg, user, expires, password_hash)}"
 
 
-def valid_token(cfg: dict, token: str | None) -> bool:
-    if not token or "." not in token or not cfg["auth"].get("secret"):
+def token_user(token: str | None) -> str | None:
+    """The user name in a token, not yet checked."""
+    return token.split(".", 1)[0] if token and token.count(".") == 2 else None
+
+
+def valid_token(cfg: dict, token: str | None, password_hash: str) -> bool:
+    if not token or token.count(".") != 2 or not cfg["auth"].get("secret"):
         return False
-    expires, signature = token.split(".", 1)
-    return expires.isdigit() and int(expires) > time.time() and hmac.compare_digest(signature, _sign(cfg, expires))
+    user, expires, signature = token.split(".")
+    return (expires.isdigit() and int(expires) > time.time()
+            and hmac.compare_digest(signature, _sign(cfg, user, expires, password_hash)))
